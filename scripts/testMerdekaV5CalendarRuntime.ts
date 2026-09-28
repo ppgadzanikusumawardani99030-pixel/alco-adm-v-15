@@ -956,4 +956,213 @@ runTest('DL. Manual SCHOOL_OVERRIDE remains highest priority and survives Confir
   assert.strictEqual(targetDay.notes, 'Upacara Mandiri');
 });
 
+// -----------------------------------------------------------------------------
+// TEST DM: Confirm disabled before Generate
+// -----------------------------------------------------------------------------
+runTest('DM. Confirm button is disabled before explicit Generate Kalender step', () => {
+  assert.ok(
+    tpmSource.includes('hasGeneratedEffectiveCalendar = useMemo(') &&
+      tpmSource.includes('isEffectiveCalendarReady =') &&
+      tpmSource.includes('disabled={!isEffectiveCalendarReady}'),
+    'Confirm button must be disabled when isEffectiveCalendarReady is false'
+  );
+});
+
+// -----------------------------------------------------------------------------
+// TEST DN: Export disabled before Generate
+// -----------------------------------------------------------------------------
+runTest('DN. Export Kalender and Export Alokasi Waktu disabled before explicit Generate step', () => {
+  assert.ok(
+    tpmSource.includes('id="btn-export-kalender"') &&
+      tpmSource.includes('disabled={isExporting === \'kalender\' || !isEffectiveCalendarReady}'),
+    'Export Kalender button must be disabled when isEffectiveCalendarReady is false'
+  );
+  assert.ok(
+    tpmSource.includes('id="btn-export-alokasi"') &&
+      tpmSource.includes('disabled={isExporting === \'alokasi\' || !isEffectiveCalendarReady}'),
+    'Export Alokasi Waktu button must be disabled when isEffectiveCalendarReady is false'
+  );
+});
+
+// -----------------------------------------------------------------------------
+// TEST DO: Confirm must not generate implicitly
+// -----------------------------------------------------------------------------
+runTest('DO. handleConfirmCalendar has mandatory guard and does not generate implicitly', () => {
+  const match = tpmSource.match(/const handleConfirmCalendar = \([\s\S]*?\n  \};/);
+  assert.ok(match, 'handleConfirmCalendar function must exist');
+  const fnBody = match[0];
+
+  assert.ok(
+    !fnBody.includes('generateEffectiveCalendarDays('),
+    'handleConfirmCalendar MUST NOT call generateEffectiveCalendarDays implicitly'
+  );
+  assert.ok(
+    fnBody.includes('!hasGeneratedEffectiveCalendar'),
+    'handleConfirmCalendar MUST validate hasGeneratedEffectiveCalendar guard'
+  );
+});
+
+// -----------------------------------------------------------------------------
+// TEST DP: Generate enables workflow
+// -----------------------------------------------------------------------------
+runTest('DP. Generate Kalender produces GENERATED_EFFECTIVE_BASELINE days enabling workflow ready contract', () => {
+  const generatedDays = generateEffectiveCalendarDays({
+    startDate: '2026-07-13',
+    endDate: '2026-12-18',
+    schoolDaysPerWeek: 5,
+    calendarId: 'cal-dp',
+    academicYear: '2026/2027',
+  });
+
+  const hasGeneratedBaseline = generatedDays.some((d) => d.sourceLayer === 'GENERATED_EFFECTIVE_BASELINE');
+  assert.strictEqual(hasGeneratedBaseline, true, 'Generated days must contain GENERATED_EFFECTIVE_BASELINE layer');
+});
+
+// -----------------------------------------------------------------------------
+// TEST DQ: Editing startDate invalidates generated baseline
+// -----------------------------------------------------------------------------
+runTest('DQ. Editing startDate invalidates old GENERATED_EFFECTIVE_BASELINE days', () => {
+  const generatedDays = generateEffectiveCalendarDays({
+    startDate: '2026-07-13',
+    endDate: '2026-12-18',
+    schoolDaysPerWeek: 5,
+    calendarId: 'cal-dq',
+    academicYear: '2026/2027',
+  });
+
+  const cleanedDays = generatedDays.filter((d) => d.sourceLayer !== 'GENERATED_EFFECTIVE_BASELINE');
+  const hasBaseline = cleanedDays.some((d) => d.sourceLayer === 'GENERATED_EFFECTIVE_BASELINE');
+  assert.strictEqual(hasBaseline, false, 'Changing startDate must purge old GENERATED_EFFECTIVE_BASELINE days');
+});
+
+// -----------------------------------------------------------------------------
+// TEST DR: Editing endDate invalidates generated baseline
+// -----------------------------------------------------------------------------
+runTest('DR. Editing endDate invalidates old GENERATED_EFFECTIVE_BASELINE days', () => {
+  const generatedDays = generateEffectiveCalendarDays({
+    startDate: '2026-07-13',
+    endDate: '2026-12-18',
+    schoolDaysPerWeek: 5,
+    calendarId: 'cal-dr',
+    academicYear: '2026/2027',
+  });
+
+  const cleanedDays = generatedDays.filter((d) => d.sourceLayer !== 'GENERATED_EFFECTIVE_BASELINE');
+  const hasBaseline = cleanedDays.some((d) => d.sourceLayer === 'GENERATED_EFFECTIVE_BASELINE');
+  assert.strictEqual(hasBaseline, false, 'Changing endDate must purge old GENERATED_EFFECTIVE_BASELINE days');
+});
+
+// -----------------------------------------------------------------------------
+// TEST DS: Switching 5 -> 6 day invalidates generated baseline
+// -----------------------------------------------------------------------------
+runTest('DS. Switching schoolDaysPerWeek 5 -> 6 invalidates old GENERATED_EFFECTIVE_BASELINE days', () => {
+  const generatedDays = generateEffectiveCalendarDays({
+    startDate: '2026-07-13',
+    endDate: '2026-12-18',
+    schoolDaysPerWeek: 5,
+    calendarId: 'cal-ds',
+    academicYear: '2026/2027',
+  });
+
+  const cleanedDays = generatedDays.filter((d) => d.sourceLayer !== 'GENERATED_EFFECTIVE_BASELINE');
+  const hasBaseline = cleanedDays.some((d) => d.sourceLayer === 'GENERATED_EFFECTIVE_BASELINE');
+  assert.strictEqual(hasBaseline, false, 'Changing schoolDaysPerWeek must invalidate old generated baseline');
+});
+
+// -----------------------------------------------------------------------------
+// TEST DT: Full final lifecycle
+// -----------------------------------------------------------------------------
+runTest('DT. Full final lifecycle: Default dates -> Generate -> HE/ME > 0 -> Confirm -> V5 save -> reload fidelity', () => {
+  mockStorage.clear();
+
+  const school = createSchoolV5({
+    name: 'SD Lifecycle',
+    npsn: '99998888',
+    address: 'Jl. Merdeka',
+    village: 'Desa B',
+    district: 'Kecamatan B',
+    regency: 'Kabupaten B',
+    province: 'Jawa Tengah',
+    principalName: 'Kepala Sekolah B',
+    principalNip: '198001012005011001',
+  });
+
+  const profile = createProfileV5({
+    name: 'Guru Lifecycle',
+    schoolId: school.id,
+    nip: '198801012012011002',
+    status: 'PNS',
+    defaultSubject: 'Matematika',
+    defaultLevel: 'SD',
+  });
+
+  const hierarchy = createYearHierarchyV5({
+    profileId: profile.id,
+    schoolId: school.id,
+    academicYear: '2026/2027',
+    curriculumType: 'KURIKULUM_MERDEKA',
+    level: 'SD',
+    grade: 'Fase A / Kelas 1',
+    subject: 'Matematika',
+  });
+
+  const sem1 = hierarchy.semesterPlans[0];
+
+  // 1. Initial draft state without explicit generate
+  const ungeneratedDays: CalendarDay[] = [];
+  const hasGeneratedBefore = ungeneratedDays.some((d) => d.sourceLayer === 'GENERATED_EFFECTIVE_BASELINE');
+  assert.strictEqual(hasGeneratedBefore, false, 'Draft state without generate must have hasGeneratedEffectiveCalendar = false');
+
+  // 2. Explicit Generate
+  const generatedDays = generateEffectiveCalendarDays({
+    startDate: '2026-07-13',
+    endDate: '2026-12-18',
+    schoolDaysPerWeek: 5,
+    calendarId: `cal-${sem1.id}`,
+    academicYear: '2026/2027',
+  });
+
+  const hasGeneratedAfter = generatedDays.some((d) => d.sourceLayer === 'GENERATED_EFFECTIVE_BASELINE');
+  assert.strictEqual(hasGeneratedAfter, true, 'Explicit generate produces GENERATED_EFFECTIVE_BASELINE');
+
+  const effResult = calculateEffectiveDays({ startDate: '2026-07-13', endDate: '2026-12-18', schoolDaysPerWeek: 5 }, generatedDays);
+  assert.ok(effResult.effectiveLearningDays > 0, 'Effective learning days must be > 0');
+
+  const weeksResult = calculateEffectiveWeeks(effResult.effectiveLearningDays, 5);
+  assert.ok(weeksResult.effectiveWeeksRounded > 0, 'Effective weeks must be > 0');
+
+  // 3. Confirm & Persist V5
+  const calObj: AcademicCalendar = {
+    id: `cal-${sem1.id}`,
+    academicSettingId: sem1.id,
+    academicYear: '2026/2027',
+    semester: '1 (Ganjil)',
+    startDate: '2026-07-13',
+    endDate: '2026-12-18',
+    schoolDaysPerWeek: 5,
+    sourceType: 'NATIONAL_HOLIDAY_OVERLAY',
+    workflowStatus: 'CONFIRMED',
+    updatedAt: new Date().toISOString(),
+  };
+
+  const confirmed = confirmCalendarWorkflow(calObj, generatedDays);
+  saveAcademicCalendarV5(sem1.id, { calendar: confirmed.calendar, days: confirmed.days });
+
+  // 4. Reload V5
+  const stateLoaded = loadStorageV5();
+  stateLoaded.activeProfileId = profile.id;
+  stateLoaded.activeYearPlanId = hierarchy.yearPlan.id;
+  stateLoaded.activeSemesterPlanId = sem1.id;
+  saveStorageV5(stateLoaded);
+
+  const runtimeCtx = getRuntimeContextV5();
+  assert.ok(runtimeCtx.semesterData?.academicCalendar, 'Calendar must exist on reload');
+
+  const reloadedDays = runtimeCtx.semesterData.academicCalendar.days;
+  const reloadedEff = calculateEffectiveDays({ startDate: '2026-07-13', endDate: '2026-12-18', schoolDaysPerWeek: 5 }, reloadedDays);
+
+  assert.strictEqual(reloadedEff.effectiveLearningDays, effResult.effectiveLearningDays, 'HE must be preserved after reload');
+  assert.strictEqual(reloadedEff.unknownDays, 0, 'unknownDays must be 0 after reload');
+});
+
 console.log(`\nAll ${totalTests} Merdeka V5 Academic Calendar Runtime audit tests PASSED successfully!\n`);

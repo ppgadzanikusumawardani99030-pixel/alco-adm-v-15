@@ -200,6 +200,14 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
     startDate && endDate && schoolDaysPerWeek && (schoolDaysPerWeek === 5 || schoolDaysPerWeek === 6)
   );
 
+  const hasGeneratedEffectiveCalendar = useMemo(
+    () => days.some((d) => d.sourceLayer === 'GENERATED_EFFECTIVE_BASELINE'),
+    [days]
+  );
+
+  const isEffectiveCalendarReady =
+    isCalendarConfigComplete && hasGeneratedEffectiveCalendar;
+
   const effectiveResult = useMemo(() => {
     if (!startDate || !endDate || !schoolDaysPerWeek) {
       return { status: 'UNRESOLVED' as const, effectiveLearningDays: 0, holidayDays: 0, effectiveWeeks: 0 };
@@ -407,7 +415,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
           setResolutionMessage(`Kalender pendidikan Kabupaten/Kota dan Provinsi belum ditemukan. Data resmi nasional telah diterapkan otomatis sebagai data awal Semester ${activeSem}.`);
 
           if (showNotification) {
-            setSaveNotification(`Acuan Nasional diterapkan otomatis untuk Semester ${activeSem} — klik "Konfirmasi Kalender" jika sudah sesuai.`);
+            setSaveNotification(`Acuan Nasional diterapkan sebagai data awal Semester ${activeSem}. Tinjau konfigurasi lalu Generate Kalender & Hitung Efektif.`);
             setTimeout(() => setSaveNotification(null), 4000);
           }
         } else {
@@ -524,7 +532,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
         setResolutionMessage(natMessage);
 
         if (showNotification) {
-          setSaveNotification(`Acuan Nasional diterapkan otomatis untuk Semester ${activeSem} — klik "Konfirmasi Kalender" jika sudah sesuai.`);
+          setSaveNotification(`Acuan Nasional diterapkan sebagai data awal Semester ${activeSem}. Tinjau konfigurasi lalu Generate Kalender & Hitung Efektif.`);
           setTimeout(() => setSaveNotification(null), 4000);
         }
       }
@@ -662,6 +670,11 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
       return;
     }
 
+    if (!hasGeneratedEffectiveCalendar) {
+      alert('Generate kalender dan hitung hari efektif terlebih dahulu.');
+      return;
+    }
+
     const currentCal: AcademicCalendar = {
       id: calendar?.id || `cal-${academicSetting.id}`,
       academicSettingId: academicSetting.id,
@@ -683,37 +696,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
-    // Project candidate / national base events if online discovery candidate was selected
-    let finalDays = days;
-    const isNational = sourceType === 'NATIONAL_HOLIDAY_OVERLAY' || (onlineDiscovery && onlineDiscovery.sourceLevel === 'NATIONAL');
-
-    if (isNational) {
-      // For NATIONAL, if they have generated, use days directly. Otherwise, generate it.
-      const hasGeneratedBaseline = days.some(d => d.sourceLayer === 'GENERATED_EFFECTIVE_BASELINE');
-      if (!hasGeneratedBaseline) {
-        finalDays = generateEffectiveCalendarDays({
-          startDate,
-          endDate,
-          schoolDaysPerWeek,
-          calendarId: calendar?.id || `cal-${academicSetting.id}`,
-          academicYear: academicSetting.academicYear || academicYear,
-          existingDays: days,
-          candidate: onlineDiscovery || undefined,
-        });
-      }
-    } else {
-      // For regional, run generateEffectiveCalendarDays to keep generated baseline + manual overrides intact,
-      // and overlay regional events correctly.
-      finalDays = generateEffectiveCalendarDays({
-        startDate,
-        endDate,
-        schoolDaysPerWeek,
-        calendarId: calendar?.id || `cal-${academicSetting.id}`,
-        academicYear: academicSetting.academicYear || academicYear || (onlineDiscovery ? onlineDiscovery.academicYear : undefined),
-        existingDays: days,
-        candidate: onlineDiscovery || undefined,
-      });
-    }
+    const finalDays = days;
     setDays(finalDays);
 
     const res = confirmCalendarWorkflow(currentCal, finalDays);
@@ -823,6 +806,10 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
       );
       return;
     }
+    if (!hasGeneratedEffectiveCalendar) {
+      alert('Generate kalender dan hitung hari efektif terlebih dahulu.');
+      return;
+    }
     setIsExporting('kalender');
     try {
       await generateKalenderAkademik({
@@ -864,6 +851,10 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
     }
     if (!startDate || !endDate || !schoolDaysPerWeek) {
       alert('Kalender pendidikan belum lengkap. Lengkapi konfigurasi waktu sebelum ekspor alokasi waktu.');
+      return;
+    }
+    if (!hasGeneratedEffectiveCalendar) {
+      alert('Generate kalender dan hitung hari efektif terlebih dahulu.');
       return;
     }
     setIsExporting('alokasi');
@@ -931,10 +922,10 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
               id="btn-export-kalender"
               type="button"
               onClick={handleExportKalender}
-              disabled={isExporting === 'kalender' || !isCalendarConfigComplete}
-              title={!isCalendarConfigComplete ? 'Lengkapi data kalender terlebih dahulu' : 'Ekspor Kalender (.docx)'}
+              disabled={isExporting === 'kalender' || !isEffectiveCalendarReady}
+              title={!isEffectiveCalendarReady ? 'Generate kalender dan hitung hari efektif terlebih dahulu.' : 'Ekspor Kalender (.docx)'}
               className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors ${
-                isCalendarConfigComplete
+                isEffectiveCalendarReady
                   ? 'text-slate-700 bg-slate-100 hover:bg-slate-200 border-slate-300'
                   : 'text-slate-400 bg-slate-50 border-slate-200 cursor-not-allowed'
               }`}
@@ -946,10 +937,10 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
               id="btn-export-alokasi"
               type="button"
               onClick={handleExportAlokasi}
-              disabled={isExporting === 'alokasi' || !isCalendarConfigComplete}
-              title={!isCalendarConfigComplete ? 'Lengkapi data kalender terlebih dahulu' : 'Ekspor Alokasi Waktu (.docx)'}
+              disabled={isExporting === 'alokasi' || !isEffectiveCalendarReady}
+              title={!isEffectiveCalendarReady ? 'Generate kalender dan hitung hari efektif terlebih dahulu.' : 'Ekspor Alokasi Waktu (.docx)'}
               className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors ${
-                isCalendarConfigComplete
+                isEffectiveCalendarReady
                   ? 'text-slate-700 bg-slate-100 hover:bg-slate-200 border-slate-300'
                   : 'text-slate-400 bg-slate-50 border-slate-200 cursor-not-allowed'
               }`}
@@ -1014,7 +1005,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
               </p>
             </div>
 
-            {/* Step 2: TINJAU HASIL */}
+            {/* Step 2: TINJAU & SESUAIKAN */}
             <div
               className={`p-3 rounded-lg border transition-all ${
                 isCalendarConfigComplete
@@ -1026,29 +1017,29 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
                 <span className="w-5 h-5 rounded-full bg-indigo-600 text-white inline-flex items-center justify-center text-[10px]">
                   2
                 </span>
-                <span>TINJAU HASIL</span>
+                <span>TINJAU &amp; SESUAIKAN</span>
               </div>
               <p className="text-[11px] text-slate-600">
-                Verifikasi {effectiveWeeks ?? '-'} pekan efektif &amp; {effectiveResult.effectiveLearningDays ?? '-'} hari efektif
+                Tinjau tanggal, hari sekolah &amp; agenda
               </p>
             </div>
 
-            {/* Step 3: SESUAIKAN */}
+            {/* Step 3: GENERATE EFEKTIF */}
             <div
               className={`p-3 rounded-lg border transition-all ${
-                isOverridden
-                  ? 'bg-amber-50/90 border-amber-300 text-amber-950'
+                hasGeneratedEffectiveCalendar
+                  ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950 font-bold'
                   : 'bg-white border-slate-200 text-slate-600'
               }`}
             >
               <div className="flex items-center gap-1.5 font-bold mb-1">
-                <span className="w-5 h-5 rounded-full bg-amber-600 text-white inline-flex items-center justify-center text-[10px]">
+                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white inline-flex items-center justify-center text-[10px]">
                   3
                 </span>
-                <span>SESUAIKAN</span>
+                <span>GENERATE EFEKTIF</span>
               </div>
               <p className="text-[11px] text-slate-600">
-                {isOverridden ? 'Penyesuaian sekolah diterapkan' : 'Opsional: atur jadwal & agenda sekolah'}
+                Hitung {effectiveWeeks ?? '-'} pekan &amp; {effectiveResult.effectiveLearningDays ?? '-'} hari efektif
               </p>
             </div>
 
@@ -1127,10 +1118,11 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
                 id="btn-confirm-calendar-workflow"
                 type="button"
                 onClick={handleConfirmCalendar}
-                disabled={!isCalendarConfigComplete}
+                disabled={!isEffectiveCalendarReady}
+                title={!isEffectiveCalendarReady ? 'Generate kalender dan hitung hari efektif terlebih dahulu.' : 'Konfirmasi Kalender'}
                 className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-bold text-xs shadow-2xs transition-colors ${
-                  isCalendarConfigComplete
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  isEffectiveCalendarReady
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
                     : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                 }`}
               >
@@ -1540,7 +1532,9 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
                   onChange={(e) => {
                     const val = e.target.value ? Number(e.target.value) : null;
                     setSchoolDaysPerWeek(val);
-                    handleApplyOverride({ schoolDaysPerWeek: val });
+                    const cleanedDays = days.filter((d) => d.sourceLayer !== 'GENERATED_EFFECTIVE_BASELINE');
+                    setDays(cleanedDays);
+                    handleApplyOverride({ schoolDaysPerWeek: val }, cleanedDays);
                   }}
                   className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white font-medium"
                 >
@@ -1557,8 +1551,11 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
                     type="date"
                     value={startDate}
                     onChange={(e) => {
-                      setStartDate(e.target.value);
-                      handleApplyOverride({ startDate: e.target.value });
+                      const val = e.target.value;
+                      setStartDate(val);
+                      const cleanedDays = days.filter((d) => d.sourceLayer !== 'GENERATED_EFFECTIVE_BASELINE');
+                      setDays(cleanedDays);
+                      handleApplyOverride({ startDate: val }, cleanedDays);
                     }}
                     className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   />
@@ -1570,8 +1567,11 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
                     type="date"
                     value={endDate}
                     onChange={(e) => {
-                      setEndDate(e.target.value);
-                      handleApplyOverride({ endDate: e.target.value });
+                      const val = e.target.value;
+                      setEndDate(val);
+                      const cleanedDays = days.filter((d) => d.sourceLayer !== 'GENERATED_EFFECTIVE_BASELINE');
+                      setDays(cleanedDays);
+                      handleApplyOverride({ endDate: val }, cleanedDays);
                     }}
                     className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   />
