@@ -499,6 +499,31 @@ runTest('12. Reserved non-ATP >= availableJP fails closed; Overwrite confirmatio
   assert.strictEqual(failResGreater.status, 'INSUFFICIENT_ATP_CAPACITY');
   assert.strictEqual(failResGreater.allocations.length, 0);
 
+  // Case A (Hardening): Reserved = 70 JP, Available = 72 JP -> Remaining = 2 JP for 5 items (< 5 JP) -> INSUFFICIENT_ATP_CAPACITY
+  const failResTooSmall = buildAutomaticSemesterAllocations({
+    annualATPItems: sampleAnnualATP.items,
+    targetSemester: '1',
+    semesterPlanId: sem1.id,
+    reservedNonAtpJP: 70,
+    s1Capacity: {
+      availableJP: totalAvailableJP,
+      effectiveWeeks: 18,
+      effectiveWeekSlots: 18,
+      actualScheduledWeeklyJP: 4,
+      isCalendarConfirmed: true,
+    },
+    s2Capacity: {
+      availableJP: totalAvailableJP,
+      effectiveWeeks: 18,
+      effectiveWeekSlots: 18,
+      actualScheduledWeeklyJP: 4,
+      isCalendarConfirmed: true,
+    },
+  });
+  assert.strictEqual(failResTooSmall.status, 'INSUFFICIENT_ATP_CAPACITY');
+  assert.strictEqual(failResTooSmall.allocations.length, 0, 'Must fail closed when remaining JP is less than number of items');
+  assert.ok(failResTooSmall.message?.includes('tidak mencukupi untuk mengalokasikan minimal 1 JP'));
+
   // Case 4: ASSESSMENT / RESERVE alone does NOT trigger existing ATP warning
   const nonAtpOnly: TimeAllocation[] = [
     { id: '1', academicSettingId: sem1.id, sourceType: 'ASSESSMENT', allocatedJP: 4, jp: 4 },
@@ -518,6 +543,95 @@ runTest('12. Reserved non-ATP >= availableJP fails closed; Overwrite confirmatio
     (a) => a.sourceType === 'ATP_ITEM' || Boolean(a.atpItemId)
   );
   assert.strictEqual(hasExistingAtpTrue, true, 'ATP allocation must be recognized as existing ATP');
+});
+
+// -----------------------------------------------------------------------------
+// TEST 13: Case B & C: Decimal Equivalent Weeks, Discrete Week Slots & Actual-Day Capacity Formula
+// -----------------------------------------------------------------------------
+runTest('13. Decimal equivalent weeks separates from discrete integer week slots, preserving actual-day JP formula', () => {
+  // Calendar with 89 effective days on 5 school days/week
+  // 89 / 5 = 17.8 equivalent weeks
+  // Discrete week slots = 18 integer slots
+  const effectiveLearningDays = 89;
+  const schoolDaysPerWeek = 5;
+  const weeklyJP = 4;
+
+  const calId = 'cal-decimal-test';
+  const days: CalendarDay[] = [];
+  const start = new Date('2026-07-13');
+  let cur = new Date(start);
+  let effectiveCount = 0;
+  let dayCounter = 1;
+  for (let w = 0; w < 18; w++) {
+    for (let d = 0; d < 7; d++) {
+      const dayOfWeek = cur.getDay();
+      const isWeekday = dayOfWeek >= 1 && dayOfWeek <= schoolDaysPerWeek;
+      let isEffective = isWeekday;
+      if (isWeekday) {
+        if (effectiveCount >= effectiveLearningDays) {
+          isEffective = false;
+        } else {
+          effectiveCount++;
+        }
+      }
+      days.push({
+        id: `day-${calId}-${dayCounter++}`,
+        academicCalendarId: calId,
+        date: cur.toISOString().slice(0, 10),
+        status: isEffective ? 'EFFECTIVE_LEARNING' : 'NON_LEARNING',
+      });
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
+
+  const cal: AcademicCalendar = {
+    id: calId,
+    academicSettingId: sem1.id,
+    academicYear: '2026/2027',
+    semester: '1 (Ganjil)',
+    startDate: '2026-07-13',
+    endDate: '2026-11-13',
+    schoolDaysPerWeek: 5,
+    workflowStatus: 'CONFIRMED',
+    updatedAt: new Date().toISOString(),
+  };
+
+  const fakeState = {
+    semesterPlans: [{ id: sem1.id, semester: 1 as const, yearPlanId: hierarchy.yearPlan.id }],
+    semesterData: { academicCalendar: [{ semesterPlanId: sem1.id, value: { calendar: cal, days } }] },
+    semesterJPSettings: [{ semesterPlanId: sem1.id, value: { semesterPlanId: sem1.id, actualScheduledWeeklyJP: weeklyJP, source: 'TEACHER_CONFIRMED' as const } }],
+  };
+
+  const cap = resolveSemesterCapacityV5(sem1.id, fakeState);
+  assert.strictEqual(cap.isReady, true);
+  assert.strictEqual(cap.effectiveWeeks, 17.8, 'Equivalent weeks must be 17.8 (89/5)');
+  assert.strictEqual(cap.effectiveWeekSlots, 18, 'Discrete week slots must be integer 18');
+
+  // Case C: JP capacity formula remains strictly based on actual effective days
+  // 4 * (89 / 5) = 71.2 -> Math.round(71.2) = 71 JP (NOT 18 * 4 = 72 JP)
+  assert.strictEqual(cap.availableJP, 71, 'Capacity must be 71 JP based on actual effective days (89 days), not inflated to 72 JP');
+
+  // Case B: Auto allocation produces integer startWeek / endWeek bounded by effectiveWeekSlots
+  const autoRes = buildAutomaticSemesterAllocations({
+    annualATPItems: sampleAnnualATP.items,
+    targetSemester: '1',
+    semesterPlanId: sem1.id,
+    s1Capacity: cap,
+    s2Capacity: cap,
+  });
+
+  assert.strictEqual(autoRes.status, 'SUCCESS');
+  assert.strictEqual(autoRes.allocations.length, 5);
+
+  autoRes.allocations.forEach((alloc) => {
+    assert.strictEqual(Number.isInteger(alloc.startWeek), true, 'startWeek must be an integer');
+    assert.strictEqual(Number.isInteger(alloc.endWeek), true, 'endWeek must be an integer');
+    assert.ok(alloc.startWeek! >= 1);
+    assert.ok(alloc.endWeek! <= cap.effectiveWeekSlots!, `endWeek (${alloc.endWeek}) must not exceed discrete week slots (${cap.effectiveWeekSlots})`);
+  });
+
+  const sumJP = autoRes.allocations.reduce((sum, a) => sum + a.allocatedJP, 0);
+  assert.strictEqual(sumJP, 71, 'Total allocated JP must match actual-day capacity (71 JP)');
 });
 
 // -----------------------------------------------------------------------------

@@ -1171,6 +1171,7 @@ export interface SemesterCapacityInfo {
   semester: '1' | '2';
   isCalendarConfirmed: boolean;
   effectiveWeeks: number | null;
+  effectiveWeekSlots: number | null;
   effectiveLearningDays: number | null;
   actualScheduledWeeklyJP: number | null;
   availableJP: number | null;
@@ -1193,12 +1194,14 @@ export interface AutoAllocationParams {
   s1Capacity: {
     availableJP: number | null;
     effectiveWeeks: number | null;
+    effectiveWeekSlots?: number | null;
     actualScheduledWeeklyJP: number | null;
     isCalendarConfirmed: boolean;
   };
   s2Capacity: {
     availableJP: number | null;
     effectiveWeeks: number | null;
+    effectiveWeekSlots?: number | null;
     actualScheduledWeeklyJP: number | null;
     isCalendarConfirmed: boolean;
   };
@@ -1358,21 +1361,38 @@ export function buildAutomaticSemesterAllocations(
     };
   }
 
-  // 4. Batasi jika jumlah item ATP melebihi minggu efektif (Fail Closed)
-  if (targetItems.length > effectiveWeeks) {
+  // Fail-closed jika kapasitas JP tersisa lebih kecil dari jumlah ATP item (kurang dari minimal 1 JP per ATP)
+  if (targetATPAvailableJP < targetItems.length) {
+    return {
+      status: 'INSUFFICIENT_ATP_CAPACITY',
+      allocations: [],
+      s1ItemsCount: partition.s1Items.length,
+      s2ItemsCount: partition.s2Items.length,
+      message: `Kapasitas JP (${targetATPAvailableJP} JP) tidak mencukupi untuk mengalokasikan minimal 1 JP per materi (${targetItems.length} materi ATP).`,
+    };
+  }
+
+  // Discrete week slots for scheduling
+  const weekSlots = Math.floor(
+    targetCap.effectiveWeekSlots ||
+      (targetCap.effectiveWeeks ? Math.ceil(targetCap.effectiveWeeks) : 18)
+  );
+
+  // 4. Batasi jika jumlah item ATP melebihi slot minggu efektif (Fail Closed)
+  if (targetItems.length > weekSlots) {
     return {
       status: 'INSUFFICIENT_EFFECTIVE_WEEKS',
       allocations: [],
       s1ItemsCount: partition.s1Items.length,
       s2ItemsCount: partition.s2Items.length,
-      message: `Jumlah item ATP (${targetItems.length}) melebihi jumlah minggu efektif (${effectiveWeeks}) pada Semester ${targetSemester}.`,
+      message: `Jumlah item ATP (${targetItems.length}) melebihi jumlah minggu efektif (${weekSlots}) pada Semester ${targetSemester}.`,
     };
   }
 
-  // 5. Distribusi pekan kontigu secara seimbang
+  // 5. Distribusi pekan kontigu secara seimbang berbasis discrete week slots
   const n = targetItems.length;
-  const baseWeeks = Math.floor(effectiveWeeks / n);
-  const remainder = effectiveWeeks % n;
+  const baseWeeks = Math.floor(weekSlots / n);
+  const remainder = weekSlots % n;
 
   const itemWeekCounts: number[] = [];
   for (let i = 0; i < n; i++) {
@@ -1385,7 +1405,7 @@ export function buildAutomaticSemesterAllocations(
     const wCount = itemWeekCounts[i];
     const rawStart = currentWeek;
     const rawEnd = currentWeek + wCount - 1;
-    const norm = normalizeWeekRange(rawStart, rawEnd, effectiveWeeks);
+    const norm = normalizeWeekRange(rawStart, rawEnd, weekSlots);
     weekRanges.push(norm);
     currentWeek = norm.endWeek + 1;
   }
@@ -1490,6 +1510,18 @@ export function resolveSemesterCapacityV5(
 
   const effectiveWeeks =
     effectiveWeeksRes?.status === 'RESOLVED' ? effectiveWeeksRes.effectiveWeeksRounded : null;
+
+  // Derive discrete week slots from actual calendar week grouping with fallback to ceil(equivalent)
+  const effectiveWeeksList = cal ? getEffectiveWeeksList(cal, days) : [];
+  const effectiveWeekSlots =
+    effectiveWeeksList.length > 0
+      ? effectiveWeeksList.length
+      : effectiveWeeksRes?.status === 'RESOLVED' && effectiveWeeksRes.effectiveWeeksEquivalent
+      ? Math.ceil(effectiveWeeksRes.effectiveWeeksEquivalent)
+      : effectiveWeeks !== null
+      ? Math.ceil(effectiveWeeks)
+      : null;
+
   const actualScheduledWeeklyJP = jpSetting?.actualScheduledWeeklyJP ?? null;
 
   let availableJP: number | null = null;
@@ -1517,8 +1549,8 @@ export function resolveSemesterCapacityV5(
     isCalendarConfirmed &&
     actualScheduledWeeklyJP !== null &&
     actualScheduledWeeklyJP > 0 &&
-    effectiveWeeks !== null &&
-    effectiveWeeks > 0 &&
+    effectiveWeekSlots !== null &&
+    effectiveWeekSlots > 0 &&
     availableJP !== null &&
     availableJP > 0
   );
@@ -1528,6 +1560,7 @@ export function resolveSemesterCapacityV5(
     semester: semNumber,
     isCalendarConfirmed,
     effectiveWeeks,
+    effectiveWeekSlots,
     effectiveLearningDays,
     actualScheduledWeeklyJP,
     availableJP,
