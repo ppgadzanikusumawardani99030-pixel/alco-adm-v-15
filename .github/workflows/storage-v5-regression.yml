@@ -103,6 +103,9 @@ jobs:
       - name: Test Canonical Alokasi Waktu Document
         run: npx tsx scripts/testCanonicalAlokasiWaktuDocument.ts
 
+      - name: Test Canonical PROTA Projection
+        run: npx tsx scripts/testCanonicalProtaProjection.ts
+
       - name: Test Profile School Binding V5
         run: npx tsx scripts/testProfileSchoolBindingV5.ts
 

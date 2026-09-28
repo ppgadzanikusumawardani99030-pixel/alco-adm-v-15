@@ -13,6 +13,7 @@ import { resolveEffectiveContext, createDocumentSnapshot } from '../../snapshot'
 import { exportAssessmentPdf } from '../../assessmentExportService';
 import { normalizeSemester } from '../../../academicScope';
 import { buildPromesProjection, buildAlokasiWaktuProjection } from '../../promesProjection';
+import { buildProtaProjection, buildK13ProtaProjection } from '../../protaProjection';
 import { buildK13AlokasiWaktuRows } from '../../k13AlokasiWaktuHelper';
 
 export async function generatePdfDocument(
@@ -300,46 +301,158 @@ export async function generatePdfDocument(
     }
 
     case 'PROTA': {
+      const isK13 = academicSetting?.curriculumType === 'K13' || academicSetting?.curriculum === 'Kurikulum 2013';
+
+      if (isK13) {
+        const k13Proj = buildK13ProtaProjection(context);
+
+        if (!isBlankMode && !k13Proj.isReady) {
+          throw new Error(
+            k13Proj.unreadyReason ||
+              'Program Tahunan belum dapat dibuat karena data analisis KD Kurikulum 2013 belum tersedia.'
+          );
+        }
+
+        title = 'Program Tahunan (PROTA)';
+        subTitle = `${subject} — ${grade} — Tahun Ajaran ${k13Proj.academicYear}`;
+        fileName = `PROTA_${cleanSubject}_${cleanGrade}.pdf`;
+
+        let rows: any[] = [];
+        if (isBlankMode) {
+          rows = Array.from({ length: 15 }, (_, idx) => [
+            idx + 1,
+            '....................',
+            '..........................................................................................',
+            '..... JP',
+            '....................',
+          ]);
+        } else {
+          rows = k13Proj.rows.map((r, idx) => [
+            idx + 1,
+            r.kd,
+            `${r.materi}\nKegiatan: ${r.kegiatan}`,
+            `${r.allocatedJP} JP`,
+            `Semester ${r.semester}`,
+          ]);
+
+          rows.push([
+            'TOTAL',
+            '',
+            'TOTAL ALOKASI JP TERCATAT',
+            `${k13Proj.totalAllocatedJP} JP`,
+            '',
+          ]);
+        }
+
+        sections.push({
+          type: 'table',
+          columns: [
+            { header: 'No', dataKey: 'no', width: 10, align: 'center' },
+            { header: 'Kompetensi Dasar (KD)', dataKey: 'code', width: 22, align: 'center' },
+            { header: 'Materi Pokok & Kegiatan Pembelajaran', dataKey: 'materi', width: 110 },
+            { header: 'Alokasi JP', dataKey: 'jp', width: 18, align: 'center' },
+            { header: 'Semester', dataKey: 'sem', width: 22, align: 'center' },
+          ],
+          rows,
+        });
+        break;
+      }
+
+      const projection = buildProtaProjection(context);
+
+      if (!isBlankMode && !projection.isReady) {
+        throw new Error(
+          projection.unreadyReason ||
+            'Program Tahunan belum dapat dibuat karena alokasi distribusi semester belum lengkap.'
+        );
+      }
+
       title = 'Program Tahunan (PROTA)';
-      subTitle = `${subject} — ${grade} — Tahun Ajaran ${academicYear}`;
+      subTitle = `${subject} — ${grade} — Tahun Ajaran ${projection.academicYear}`;
       fileName = `PROTA_${cleanSubject}_${cleanGrade}.pdf`;
 
-      const rows = isBlankMode
-        ? Array.from({ length: 15 }, (_, idx) => [
-            idx + 1,
-            '...............',
-            `TP ${idx + 1}`,
-            '..........................................................................................',
-            '....................',
-            '..... JP',
-          ])
-        : (atp?.items || []).map((it, idx) => {
-            const itJp = it.allocatedJP ?? it.jp;
-            const itJpDisplay = itJp != null ? `${itJp} JP` : '—';
-            const itSem = normalizeSemester((it as any).semester);
-            const semDisplay = itSem === 1 ? 'Semester 1' : itSem === 2 ? 'Semester 2' : '—';
-            return [
-              idx + 1,
-              semDisplay,
-              it.tpCode || `TP ${idx + 1}`,
-              it.tpStatement || '-',
-              it.materialScope || '-',
-              itJpDisplay,
-            ];
-          });
+      let rows: any[] = [];
+      if (isBlankMode) {
+        rows = Array.from({ length: 15 }, (_, idx) => [
+          idx + 1,
+          '....................',
+          '..........................................................................................',
+          '....................',
+          '..... JP',
+          '....................',
+        ]);
+      } else {
+        const s1Atp = projection.rows.filter((r) => r.semester === 1);
+        const s1Assess = projection.assessmentRows.filter((r) => r.semester === 1);
+        const s1Reserve = projection.reserveRows.filter((r) => r.semester === 1);
+
+        const s2Atp = projection.rows.filter((r) => r.semester === 2);
+        const s2Assess = projection.assessmentRows.filter((r) => r.semester === 2);
+        const s2Reserve = projection.reserveRows.filter((r) => r.semester === 2);
+
+        const allOrderedRows = [
+          ...s1Atp,
+          ...s1Assess,
+          ...s1Reserve,
+          ...s2Atp,
+          ...s2Assess,
+          ...s2Reserve,
+        ];
+
+        rows = allOrderedRows.map((r, idx) => [
+          idx + 1,
+          r.tpCode,
+          r.tpStatement,
+          r.materialScope,
+          `${r.allocatedJP} JP`,
+          `Semester ${r.semester}`,
+        ]);
+
+        rows.push([
+          'TOTAL',
+          '',
+          'TOTAL ALOKASI JP TERCATAT',
+          '',
+          `${projection.totalAllocatedJP} JP`,
+          '',
+        ]);
+      }
 
       sections.push({
         type: 'table',
         columns: [
-          { header: 'No', dataKey: 'no', width: 12, align: 'center' },
-          { header: 'Semester', dataKey: 'sem', width: 25, align: 'center' },
-          { header: 'Kode TP', dataKey: 'code', width: 22, align: 'center' },
-          { header: 'Tujuan Pembelajaran', dataKey: 'tp', width: 65 },
+          { header: 'No', dataKey: 'no', width: 10, align: 'center' },
+          { header: 'Kode / Jenis', dataKey: 'code', width: 22, align: 'center' },
+          { header: 'Tujuan Pembelajaran / Kegiatan', dataKey: 'tp', width: 65 },
           { header: 'Lingkup Materi', dataKey: 'mat', width: 45 },
-          { header: 'Alokasi Waktu', dataKey: 'jp', width: 20, align: 'center' },
+          { header: 'Alokasi JP', dataKey: 'jp', width: 18, align: 'center' },
+          { header: 'Semester', dataKey: 'sem', width: 22, align: 'center' },
         ],
         rows,
       });
+
+      if (!isBlankMode) {
+        const lines: string[] = [
+          `• Alokasi Semester 1: ${projection.semester1AllocatedJP} JP`,
+          `• Alokasi Semester 2: ${projection.semester2AllocatedJP} JP`,
+          `• Total Alokasi Tahunan: ${projection.totalAllocatedJP} JP`,
+          `• Kapasitas JP Tahunan Resmi: ${projection.officialAnnualJP !== null ? `${projection.officialAnnualJP} JP` : 'Belum Diverifikasi'}`,
+          `• Sisa / Selisih JP: ${projection.remainingAnnualJP !== null ? `${projection.remainingAnnualJP} JP` : '—'}`,
+          `• Status Alokasi: ${projection.validationStatus}`,
+        ];
+        if (projection.referenceWeeklyEquivalentJP !== null) {
+          lines.push(`• Referensi Ekuivalen JP per Minggu: ${projection.referenceWeeklyEquivalentJP} JP / Minggu`);
+        }
+        sections.push({
+          type: 'heading',
+          text: 'Status Alokasi Waktu Tahunan',
+          level: 2,
+        });
+        sections.push({
+          type: 'paragraph',
+          text: lines.join('\n'),
+        });
+      }
       break;
     }
 

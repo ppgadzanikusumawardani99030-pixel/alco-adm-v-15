@@ -39,6 +39,7 @@ import {
   AssessmentPlan,
   AssessmentPackage,
   SemesterJPSetting,
+  AnnualJPReference,
 } from '../../types';
 import { TimePlanningManager } from './TimePlanningManager';
 import { AttendanceManager } from './AttendanceManager';
@@ -49,6 +50,7 @@ import { AssessmentPackageBuilder } from './AssessmentPackageBuilder';
 import { FollowUpManager } from './FollowUpManager';
 import { LearningPlanManager } from './LearningPlanManager';
 import { AdminDocsExport } from '../AdminDocsExport';
+import { ProtaSemesterAllocationBundle } from '../../services/documentEngine';
 import { isK13 } from '../../services/curriculumRouter';
 import { buildAdministrationChainDiagnosticReport } from '../../services/diagnosticService';
 
@@ -87,6 +89,8 @@ interface AdministrationHubProps {
   assessmentPlans?: AssessmentPlan[];
   assessmentPackages?: AssessmentPackage[];
   semesterJPSetting?: SemesterJPSetting;
+  annualJPReference?: AnnualJPReference;
+  protaSemesterAllocations?: ProtaSemesterAllocationBundle[];
   initialTab?: AdministrationTab;
   onSaveCalendar: (calendar: AcademicCalendar, days: CalendarDay[], actualScheduledWeeklyJP?: number | null) => void;
   onSaveTimeAllocations: (allocations: TimeAllocation[]) => void;
@@ -135,6 +139,8 @@ export const AdministrationHub: React.FC<AdministrationHubProps> = ({
   learningPlans = [],
   assessmentPlans = [],
   assessmentPackages = [],
+  annualJPReference,
+  protaSemesterAllocations = [],
   initialTab = 'time_planning',
   onSaveCalendar,
   onSaveTimeAllocations,
@@ -564,6 +570,8 @@ export const AdministrationHub: React.FC<AdministrationHubProps> = ({
             calendarDays={calendarDays}
             timeAllocations={timeAllocations}
             semesterJPSetting={semesterJPSetting}
+            annualJPReference={annualJPReference}
+            protaSemesterAllocations={protaSemesterAllocations}
             attendanceSessions={attendanceSessions}
             attendanceRecords={attendanceRecords}
             assessmentCriteria={assessmentCriteria}

@@ -27,9 +27,16 @@ import {
   DocumentMode,
   DocumentSnapshot,
   SemesterJPSetting,
+  AnnualJPReference,
 } from '../../types';
 
 export type { DocumentType, DocumentMode, DocumentSnapshot, AppDocumentRecord };
+
+export interface ProtaSemesterAllocationBundle {
+  semesterPlanId: string;
+  semester: 1 | 2;
+  allocations: TimeAllocation[];
+}
 
 export interface DocumentGenerationContext {
   school: SchoolData;
@@ -48,6 +55,8 @@ export interface DocumentGenerationContext {
   calendarDays?: CalendarDay[];
   timeAllocations?: TimeAllocation[];
   semesterJPSetting?: SemesterJPSetting;
+  annualJPReference?: AnnualJPReference;
+  protaSemesterAllocations?: ProtaSemesterAllocationBundle[];
   attendanceSessions?: AttendanceSession[];
   attendanceRecords?: AttendanceRecord[];
   assessmentCriteria?: AssessmentCriterion[];

@@ -29,9 +29,11 @@ import { isValidDocumentDate } from '../documentDateService';
 import { validateKKTPData } from '../cpWorkflowService';
 import { checkAssessmentExportEligibility, isAssessmentDocumentSnapshot } from './assessmentExportService';
 import { buildPromesProjection, buildAlokasiWaktuProjection } from './promesProjection';
+import { buildProtaProjection, buildK13ProtaProjection } from './protaProjection';
 
 export * from './types';
 export * from './promesProjection';
+export * from './protaProjection';
 export * from './k13AlokasiWaktuHelper';
 export * from './snapshot';
 export * from './docxStyles';
@@ -415,11 +417,16 @@ export function validateDocumentRequirements(
         }
         break;
 
-      case 'PROTA':
-        if (atpCount === 0) {
-          missingFields.push('Alur Tujuan Pembelajaran (ATP) belum disusun');
+      case 'PROTA': {
+        const projection = buildProtaProjection(context as DocumentGenerationContext);
+        if (!projection.isReady) {
+          missingFields.push(
+            projection.unreadyReason ||
+              'Program Tahunan belum dapat dibuat karena prasyarat distribusi semester belum lengkap.'
+          );
         }
         break;
+      }
 
       case 'PROMES': {
         const projection = buildPromesProjection(context as DocumentGenerationContext);

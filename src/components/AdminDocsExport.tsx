@@ -52,6 +52,7 @@ import {
   DocumentMode,
   WorkflowStepId,
   SemesterJPSetting,
+  AnnualJPReference,
 } from '../types';
 import {
   DOCUMENT_CATALOG,
@@ -70,6 +71,9 @@ import {
   buildPromesProjection,
   buildAlokasiWaktuProjection,
   buildK13AlokasiWaktuRows,
+  buildProtaProjection,
+  buildK13ProtaProjection,
+  ProtaSemesterAllocationBundle,
 } from '../services/documentEngine';
 import { getCurriculumType } from '../services/curriculumRules';
 import { isK13 as isK13Check, getCurriculumDocumentTypes } from '../services/curriculumRouter';
@@ -90,6 +94,8 @@ interface AdminDocsExportProps {
   calendarDays?: CalendarDay[];
   timeAllocations?: TimeAllocation[];
   semesterJPSetting?: SemesterJPSetting;
+  annualJPReference?: AnnualJPReference;
+  protaSemesterAllocations?: ProtaSemesterAllocationBundle[];
   attendanceSessions?: AttendanceSession[];
   attendanceRecords?: AttendanceRecord[];
   assessmentCriteria?: AssessmentCriterion[];
@@ -120,6 +126,8 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
   calendarDays,
   timeAllocations,
   semesterJPSetting,
+  annualJPReference,
+  protaSemesterAllocations = [],
   attendanceSessions,
   attendanceRecords,
   assessmentCriteria,
@@ -189,6 +197,8 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
     calendarDays,
     timeAllocations,
     semesterJPSetting,
+    annualJPReference,
+    protaSemesterAllocations,
     attendanceSessions,
     attendanceRecords,
     assessmentCriteria,
@@ -1296,45 +1306,194 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
             )}
 
             {/* 2. PROTA PREVIEW */}
-            {activePreviewType === 'PROTA' && (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <h5 className="font-bold text-slate-900 uppercase">Distribusi Alokasi Waktu Pembelajaran Tahunan</h5>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-[11px] border border-slate-300 border-collapse">
-                      <thead>
-                        <tr className="bg-blue-900 text-white font-semibold">
-                          <th className="p-1.5 border border-blue-800 text-center w-7">No</th>
-                          <th className="p-1.5 border border-blue-800 w-16">Kode TP</th>
-                          <th className="p-1.5 border border-blue-800">Tujuan Pembelajaran & Ruang Lingkup Materi</th>
-                          <th className="p-1.5 border border-blue-800 text-center w-16">Alokasi</th>
-                          <th className="p-1.5 border border-blue-800 text-center w-24">Semester</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(atp?.items || []).map((item, idx) => (
-                          <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                            <td className="p-1.5 border border-slate-300 text-center font-bold">{idx + 1}</td>
-                            <td className="p-1.5 border border-slate-300 font-mono font-bold text-blue-900 text-center">{item.tpCode}</td>
-                            <td className="p-1.5 border border-slate-300">
-                              <div className="font-medium">{item.tpStatement}</div>
-                              {item.materialScope && <div className="text-[10px] text-slate-500 italic">Materi: {item.materialScope}</div>}
-                            </td>
-                            <td className="p-1.5 border border-slate-300 text-center font-bold">{item.jp || 4} JP</td>
-                            <td className="p-1.5 border border-slate-300 text-center">{academicSetting.semester || '-'}</td>
-                          </tr>
-                        ))}
-                        <tr className="bg-slate-100 font-bold">
-                          <td colSpan={3} className="p-1.5 border border-slate-300 text-right">TOTAL ALOKASI TAHUNAN:</td>
-                          <td className="p-1.5 border border-slate-300 text-center text-blue-900">{totalJP + 4} JP</td>
-                          <td className="p-1.5 border border-slate-300"></td>
-                        </tr>
-                      </tbody>
-                    </table>
+            {activePreviewType === 'PROTA' && (() => {
+              if (isK13Curriculum) {
+                const k13Proj = buildK13ProtaProjection(context);
+
+                if (!k13Proj.isReady && documentMode !== 'blank') {
+                  return (
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs font-medium space-y-2">
+                      <div className="font-bold flex items-center gap-1.5 text-amber-900">
+                        <AlertCircle className="w-4 h-4 text-amber-600" />
+                        Prasyarat Program Tahunan (K13) Belum Terpenuhi
+                      </div>
+                      <div>{k13Proj.unreadyReason || 'Program Tahunan belum dapat dibuat karena analisis Kompetensi Dasar belum terisi.'}</div>
+                    </div>
+                  );
+                }
+
+                const rows = documentMode === 'blank'
+                  ? Array.from({ length: 3 }, (_, idx) => ({
+                      id: `${idx}`,
+                      kd: '',
+                      materi: '',
+                      kegiatan: '',
+                      allocatedJP: 0,
+                      semester: 1 as const,
+                    }))
+                  : k13Proj.rows;
+
+                return (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <h5 className="font-bold text-slate-900 uppercase">Distribusi Alokasi Waktu Pembelajaran Tahunan (K13)</h5>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-[11px] border border-slate-300 border-collapse">
+                          <thead>
+                            <tr className="bg-blue-900 text-white font-semibold">
+                              <th className="p-1.5 border border-blue-800 text-center w-7">No</th>
+                              <th className="p-1.5 border border-blue-800 w-24">Kompetensi Dasar (KD)</th>
+                              <th className="p-1.5 border border-blue-800">Materi Pokok & Kegiatan Pembelajaran</th>
+                              <th className="p-1.5 border border-blue-800 text-center w-24">Alokasi JP</th>
+                              <th className="p-1.5 border border-blue-800 text-center w-24">Semester</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map((r, idx) => (
+                              <tr key={r.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                <td className="p-1.5 border border-slate-300 text-center font-bold">{idx + 1}</td>
+                                <td className="p-1.5 border border-slate-300 font-mono font-bold text-blue-900 text-center">{r.kd}</td>
+                                <td className="p-1.5 border border-slate-300">
+                                  {documentMode === 'blank' ? '' : (
+                                    <>
+                                      <div className="font-medium">{r.materi}</div>
+                                      <div className="text-[10px] text-slate-500 italic">Kegiatan: {r.kegiatan}</div>
+                                    </>
+                                  )}
+                                </td>
+                                <td className="p-1.5 border border-slate-300 text-center font-bold">
+                                  {documentMode === 'blank' ? '' : `${r.allocatedJP} JP`}
+                                </td>
+                                <td className="p-1.5 border border-slate-300 text-center">
+                                  {documentMode === 'blank' ? '' : `Semester ${r.semester}`}
+                                </td>
+                              </tr>
+                            ))}
+                            {documentMode !== 'blank' && (
+                              <tr className="bg-slate-100 font-bold">
+                                <td colSpan={3} className="p-1.5 border border-slate-300 text-right">TOTAL ALOKASI JP TERCATAT:</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-blue-900">{k13Proj.totalAllocatedJP} JP</td>
+                                <td className="p-1.5 border border-slate-300"></td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
                   </div>
+                );
+              }
+
+              const projection = buildProtaProjection(context);
+
+              if (!projection.isReady && documentMode !== 'blank') {
+                return (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs font-medium space-y-2">
+                    <div className="font-bold flex items-center gap-1.5 text-amber-900">
+                      <AlertCircle className="w-4 h-4 text-amber-600" />
+                      Prasyarat Program Tahunan Belum Terpenuhi
+                    </div>
+                    <div>{projection.unreadyReason || 'Program Tahunan belum dapat dibuat karena alokasi distribusi semester belum lengkap.'}</div>
+                  </div>
+                );
+              }
+
+              const rows = documentMode === 'blank'
+                ? Array.from({ length: 3 }, (_, idx) => ({
+                    id: `${idx}`,
+                    tpCode: '',
+                    tpStatement: '',
+                    materialScope: '',
+                    allocatedJP: 0,
+                    semester: 1 as const,
+                  }))
+                : [
+                    ...projection.rows.filter((r) => r.semester === 1),
+                    ...projection.assessmentRows.filter((r) => r.semester === 1),
+                    ...projection.reserveRows.filter((r) => r.semester === 1),
+                    ...projection.rows.filter((r) => r.semester === 2),
+                    ...projection.assessmentRows.filter((r) => r.semester === 2),
+                    ...projection.reserveRows.filter((r) => r.semester === 2),
+                  ];
+
+              return (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h5 className="font-bold text-slate-900 uppercase">Distribusi Alokasi Waktu Pembelajaran Tahunan</h5>
+                      {documentMode !== 'blank' && (
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                          projection.validationStatus === 'BALANCED'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : projection.validationStatus === 'UNDER_ALLOCATED' || projection.validationStatus === 'UNVERIFIED_CAPACITY'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-rose-50 text-rose-700 border-rose-200'
+                        }`}>
+                          {projection.validationStatus} ({projection.totalAllocatedJP} {projection.officialAnnualJP !== null ? `/ ${projection.officialAnnualJP}` : ''} JP)
+                        </span>
+                      )}
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-[11px] border border-slate-300 border-collapse">
+                        <thead>
+                          <tr className="bg-blue-900 text-white font-semibold">
+                            <th className="p-1.5 border border-blue-800 text-center w-7">No</th>
+                            <th className="p-1.5 border border-blue-800 w-24">Kode / Jenis</th>
+                            <th className="p-1.5 border border-blue-800">Tujuan Pembelajaran / Kegiatan</th>
+                            <th className="p-1.5 border border-blue-800 w-32">Lingkup Materi</th>
+                            <th className="p-1.5 border border-blue-800 text-center w-24">Alokasi JP</th>
+                            <th className="p-1.5 border border-blue-800 text-center w-24">Semester</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((r, idx) => (
+                            <tr key={r.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                              <td className="p-1.5 border border-slate-300 text-center font-bold">{idx + 1}</td>
+                              <td className="p-1.5 border border-slate-300 font-mono font-bold text-blue-900 text-center">{r.tpCode}</td>
+                              <td className="p-1.5 border border-slate-300">
+                                <div className="font-medium">{r.tpStatement}</div>
+                              </td>
+                              <td className="p-1.5 border border-slate-300">
+                                <div className="text-slate-600">{r.materialScope}</div>
+                              </td>
+                              <td className="p-1.5 border border-slate-300 text-center font-bold">
+                                {documentMode === 'blank' ? '' : `${r.allocatedJP} JP`}
+                              </td>
+                              <td className="p-1.5 border border-slate-300 text-center">
+                                {documentMode === 'blank' ? '' : `Semester ${r.semester}`}
+                              </td>
+                            </tr>
+                          ))}
+                          {documentMode !== 'blank' && (
+                            <>
+                              <tr className="bg-slate-100 font-bold">
+                                <td colSpan={4} className="p-1.5 border border-slate-300 text-right">TOTAL ALOKASI JP TERCATAT:</td>
+                                <td className="p-1.5 border border-slate-300 text-center text-blue-900">{projection.totalAllocatedJP} JP</td>
+                                <td className="p-1.5 border border-slate-300"></td>
+                              </tr>
+                            </>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {documentMode !== 'blank' && (
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-1">
+                      <div className="font-bold text-slate-800">Status & Ringkasan Alokasi:</div>
+                      <div>• Alokasi Semester 1: <strong>{projection.semester1AllocatedJP} JP</strong></div>
+                      <div>• Alokasi Semester 2: <strong>{projection.semester2AllocatedJP} JP</strong></div>
+                      <div>• Total Alokasi Tahunan: <strong>{projection.totalAllocatedJP} JP</strong></div>
+                      <div>• Kapasitas JP Tahunan Resmi: <strong>{projection.officialAnnualJP !== null ? `${projection.officialAnnualJP} JP` : 'Belum Diverifikasi'}</strong></div>
+                      <div>• Sisa / Selisih JP: <strong>{projection.remainingAnnualJP !== null ? `${projection.remainingAnnualJP} JP` : '—'}</strong></div>
+                      {projection.referenceWeeklyEquivalentJP !== null && (
+                        <div>• Referensi Ekuivalen JP per Minggu: <strong>{projection.referenceWeeklyEquivalentJP} JP / Minggu</strong></div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* 3. PROMES PREVIEW */}
             {activePreviewType === 'PROMES' && (() => {

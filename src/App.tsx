@@ -125,6 +125,19 @@ export function App() {
     activeSemesterPlan,
   } = runtimeContext;
 
+  const protaSemesterAllocations = useMemo(() => {
+    return semesterPlansForActiveYear.map((sp) => {
+      const allocations = v5State.semesterData.timeAllocation.find(
+        (e) => e.semesterPlanId === sp.id
+      )?.value || [];
+      return {
+        semesterPlanId: sp.id,
+        semester: sp.semester,
+        allocations,
+      };
+    });
+  }, [semesterPlansForActiveYear, v5State.semesterData.timeAllocation]);
+
   const activeSchoolForView = activeSchool || EMPTY_SCHOOL_VIEW;
   const newWorkspaceLevel = activeProfile?.defaultLevel || '';
   const availableGrades = newWorkspaceLevel && GRADE_PHASE_MAP[newWorkspaceLevel]
@@ -1043,6 +1056,8 @@ export function App() {
               calendarDays={runtimeContext.semesterData?.academicCalendar?.days || []}
               timeAllocations={runtimeContext.semesterData?.timeAllocation || []}
               semesterJPSetting={runtimeContext.semesterJPSetting}
+              annualJPReference={runtimeContext.annualData?.annualJPReference}
+              protaSemesterAllocations={protaSemesterAllocations}
               attendanceSessions={[]}
               attendanceRecords={[]}
               assessmentCriteria={[]}
