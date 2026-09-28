@@ -68,6 +68,8 @@ import {
   ZipExportFormat,
   ZipExportResult,
   buildPromesProjection,
+  buildAlokasiWaktuProjection,
+  buildK13AlokasiWaktuRows,
 } from '../services/documentEngine';
 import { getCurriculumType } from '../services/curriculumRules';
 import { isK13 as isK13Check, getCurriculumDocumentTypes } from '../services/curriculumRouter';
@@ -1414,7 +1416,9 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
             {/* ALOKASI WAKTU PREVIEW */}
             {activePreviewType === 'ALOKASI_WAKTU' && (() => {
               if (isK13Curriculum) {
-                const k13Items = k13Analysis?.items || [];
+                const k13Rows = buildK13AlokasiWaktuRows(k13Analysis?.items || [], timeAllocations);
+                const totalK13JP = k13Rows.reduce((sum, r) => sum + r.allocatedJP, 0);
+
                 return (
                   <div className="space-y-4">
                     <div className="space-y-2">
@@ -1426,18 +1430,36 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
                               <th className="p-1.5 border border-blue-800 text-center w-8">No</th>
                               <th className="p-1.5 border border-blue-800 w-20">Kode KD</th>
                               <th className="p-1.5 border border-blue-800 min-w-[160px]">Materi Pokok & Kegiatan</th>
-                              <th className="p-1.5 border border-blue-800 text-center w-16">Alokasi JP</th>
+                              <th className="p-1.5 border border-blue-800 text-center w-20">Alokasi JP</th>
+                              <th className="p-1.5 border border-blue-800 text-center w-28">Distribusi Pekan</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {k13Items.map((item, idx) => (
-                              <tr key={item.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                                <td className="p-1.5 border border-slate-300 text-center font-bold">{idx + 1}</td>
-                                <td className="p-1.5 border border-slate-300 font-mono font-bold text-blue-900">{item.kd}</td>
-                                <td className="p-1.5 border border-slate-300">{item.materi || '-'}</td>
-                                <td className="p-1.5 border border-slate-300 text-center font-bold">{item.alokasiJp ? `${item.alokasiJp} JP` : '-'}</td>
+                            {k13Rows.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="p-4 text-center text-slate-400 italic">
+                                  Belum ada butir analisis KD yang disusun.
+                                </td>
                               </tr>
-                            ))}
+                            ) : (
+                              k13Rows.map((item, idx) => (
+                                <tr key={item.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                  <td className="p-1.5 border border-slate-300 text-center font-bold">{idx + 1}</td>
+                                  <td className="p-1.5 border border-slate-300 font-mono font-bold text-blue-900">{item.kdCode}</td>
+                                  <td className="p-1.5 border border-slate-300">
+                                    {item.materi}
+                                    {item.kegiatan ? <div className="text-[10px] text-slate-500">• Kegiatan: {item.kegiatan}</div> : null}
+                                  </td>
+                                  <td className="p-1.5 border border-slate-300 text-center font-bold">{item.allocatedJP} JP</td>
+                                  <td className="p-1.5 border border-slate-300 text-center font-medium">{item.weekDisplay}</td>
+                                </tr>
+                              ))
+                            )}
+                            <tr className="bg-slate-100 font-bold">
+                              <td colSpan={3} className="p-1.5 border border-slate-300 text-right">TOTAL ALOKASI JP:</td>
+                              <td className="p-1.5 border border-slate-300 text-center text-blue-900">{totalK13JP} JP</td>
+                              <td className="p-1.5 border border-slate-300 text-center text-slate-600">-</td>
+                            </tr>
                           </tbody>
                         </table>
                       </div>
@@ -1446,7 +1468,7 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
                 );
               }
 
-              const projection = buildPromesProjection(context);
+              const projection = buildAlokasiWaktuProjection(context);
               const allRows = [...projection.rows, ...projection.assessmentRows, ...projection.reserveRows];
 
               if (!projection.isReady && documentMode !== 'blank') {

@@ -18,8 +18,9 @@ import {
   createSectionHeading,
   createDocxSectionProperties,
 } from '../docxStyles';
-import { getSubjectJP, normalizeLearningAllocation } from '../../jpEngine';
-import { buildPromesProjection } from '../promesProjection';
+import { getSubjectJP } from '../../jpEngine';
+import { buildAlokasiWaktuProjection } from '../promesProjection';
+import { buildK13AlokasiWaktuRows } from '../k13AlokasiWaktuHelper';
 
 export async function generateAlokasiWaktu(context: DocumentGenerationContext): Promise<GeneratedDocumentResult> {
   const { school, profile, academicSetting, calendar, timeAllocations, k13Analysis } = context;
@@ -37,7 +38,7 @@ export async function generateAlokasiWaktu(context: DocumentGenerationContext): 
   });
 
   // Projection for Kurikulum Merdeka
-  const projection = buildPromesProjection(context);
+  const projection = buildAlokasiWaktuProjection(context);
 
   if (!isK13Curriculum && context.documentMode !== 'blank' && !projection.isReady) {
     throw new Error(
@@ -50,17 +51,13 @@ export async function generateAlokasiWaktu(context: DocumentGenerationContext): 
     ? (academicSetting.subjectWeeklyJP || calendar?.jpPerWeek || academicSetting.totalHoursPerWeek || officialRule.weeklyJP || null)
     : projection.actualScheduledWeeklyJP;
 
-  // Normalize allocations for K13
-  const normalizedAllocations = (timeAllocations || []).map(normalizeLearningAllocation);
+  // Resolved rows for K13
+  const k13Rows = isK13Curriculum ? buildK13AlokasiWaktuRows(k13Analysis?.items || [], timeAllocations) : [];
 
   // Compute total planned JP from recorded allocations or explicit unit JP
   let totalAllocatedJP = 0;
   if (isK13Curriculum) {
-    (k13Analysis?.items || []).forEach((item) => {
-      const match = normalizedAllocations.find((a) => a.sourceId === item.id || a.sourceId === item.kd);
-      const jp = match?.allocatedJP ?? (item.alokasiJp ? Number(item.alokasiJp) : 0);
-      totalAllocatedJP += jp;
-    });
+    totalAllocatedJP = k13Rows.reduce((sum, r) => sum + r.allocatedJP, 0);
   } else {
     totalAllocatedJP = projection.totalAllocatedJP;
   }
@@ -121,8 +118,7 @@ export async function generateAlokasiWaktu(context: DocumentGenerationContext): 
   ];
 
   if (isK13Curriculum) {
-    const k13Items = k13Analysis?.items || [];
-    if (k13Items.length === 0) {
+    if (k13Rows.length === 0) {
       rows.push(
         new TableRow({
           children: [
@@ -135,29 +131,15 @@ export async function generateAlokasiWaktu(context: DocumentGenerationContext): 
         })
       );
     } else {
-      k13Items.forEach((item, index) => {
-        const matchingAlloc = normalizedAllocations.find(
-          (a) => a.sourceId === item.id || a.sourceId === item.kd
-        );
-        const itemJP = matchingAlloc?.allocatedJP ?? (item.alokasiJp ? Number(item.alokasiJp) : null);
-        
-        let weekDisplay = '-';
-        if (matchingAlloc?.startWeek && matchingAlloc?.endWeek) {
-          weekDisplay = matchingAlloc.startWeek === matchingAlloc.endWeek
-            ? `Pekan ${matchingAlloc.startWeek}`
-            : `Pekan ${matchingAlloc.startWeek} - ${matchingAlloc.endWeek}`;
-        } else if (matchingAlloc?.weekNumber) {
-          weekDisplay = `Pekan ${matchingAlloc.weekNumber}`;
-        }
-
+      k13Rows.forEach((item, index) => {
         rows.push(
           new TableRow({
             children: [
               createTableDataCell((index + 1).toString(), 8, AlignmentType.CENTER),
-              createTableDataCell(item.kd, 16, AlignmentType.LEFT, true),
-              createTableDataCell(`${item.materi || '-'}\n• Kegiatan: ${item.kegiatan || '-'}`, 48),
-              createTableDataCell(itemJP !== null ? `${itemJP} JP` : '-', 14, AlignmentType.CENTER, true),
-              createTableDataCell(weekDisplay, 14, AlignmentType.CENTER),
+              createTableDataCell(item.kdCode, 16, AlignmentType.LEFT, true),
+              createTableDataCell(`${item.materi || '-'}${item.kegiatan ? `\n• Kegiatan: ${item.kegiatan}` : ''}`, 48),
+              createTableDataCell(`${item.allocatedJP} JP`, 14, AlignmentType.CENTER, true),
+              createTableDataCell(item.weekDisplay, 14, AlignmentType.CENTER),
             ],
           })
         );

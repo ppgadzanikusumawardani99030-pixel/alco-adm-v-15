@@ -12,7 +12,8 @@ import { formatOfficialDate, PdfStyleProfile } from './pdfTheme';
 import { resolveEffectiveContext, createDocumentSnapshot } from '../../snapshot';
 import { exportAssessmentPdf } from '../../assessmentExportService';
 import { normalizeSemester } from '../../../academicScope';
-import { buildPromesProjection } from '../../promesProjection';
+import { buildPromesProjection, buildAlokasiWaktuProjection } from '../../promesProjection';
+import { buildK13AlokasiWaktuRows } from '../../k13AlokasiWaktuHelper';
 
 export async function generatePdfDocument(
   type: DocumentType,
@@ -34,7 +35,7 @@ export async function generatePdfDocument(
   }
 
   const snapshot = context.snapshot || createDocumentSnapshot(context, 'pdf', context.documentMode);
-  const { school, profile, academicSetting, cp, tp, atp, students, calendarDays, timeAllocations } = context;
+  const { school, profile, academicSetting, cp, tp, atp, students, calendarDays, timeAllocations, k13Analysis } = context;
   const isBlankMode = context.documentMode === 'blank';
 
   const subject = academicSetting?.subject || '-';
@@ -766,7 +767,7 @@ export async function generatePdfDocument(
         subTitle = `${subject} — ${grade} — Semester ${semester}`;
         fileName = `Alokasi_Waktu_${cleanSubject}_${cleanGrade}.pdf`;
 
-        const allocs = timeAllocations || [];
+        const k13Rows = buildK13AlokasiWaktuRows(k13Analysis?.items || [], timeAllocations);
         const rows = isBlankMode
           ? Array.from({ length: 15 }, (_, idx) => [
               idx + 1,
@@ -776,14 +777,16 @@ export async function generatePdfDocument(
               '..... JP',
               '....................',
             ])
-          : allocs.map((a, idx) => [
+          : k13Rows.length > 0
+          ? k13Rows.map((r, idx) => [
               idx + 1,
-              a.sourceId || `KD ${idx + 1}`,
-              a.notes || '—',
-              a.weekNumber ? `Pekan ke-${a.weekNumber}` : '—',
-              a.jp != null ? `${a.jp} JP` : '—',
-              a.notes || '—',
-            ]);
+              r.kdCode,
+              r.materi,
+              r.weekDisplay,
+              `${r.allocatedJP} JP`,
+              '-',
+            ])
+          : [[1, '—', 'Belum ada analisis KD yang disusun.', '—', '—', '—']];
 
         sections.push({
           type: 'table',
@@ -800,7 +803,7 @@ export async function generatePdfDocument(
         break;
       }
 
-      const projection = buildPromesProjection(context);
+      const projection = buildAlokasiWaktuProjection(context);
 
       if (!isBlankMode && !projection.isReady) {
         throw new Error(

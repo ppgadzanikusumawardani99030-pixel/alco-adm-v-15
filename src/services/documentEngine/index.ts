@@ -28,10 +28,11 @@ import { validateLearningPlan } from '../learningPlanService';
 import { isValidDocumentDate } from '../documentDateService';
 import { validateKKTPData } from '../cpWorkflowService';
 import { checkAssessmentExportEligibility, isAssessmentDocumentSnapshot } from './assessmentExportService';
-import { buildPromesProjection } from './promesProjection';
+import { buildPromesProjection, buildAlokasiWaktuProjection } from './promesProjection';
 
 export * from './types';
 export * from './promesProjection';
+export * from './k13AlokasiWaktuHelper';
 export * from './snapshot';
 export * from './docxStyles';
 export * from './renderers/pdf/pdfRenderer';
@@ -342,6 +343,7 @@ export function validateDocumentRequirements(
 
     switch (type) {
       case 'ANALISIS_SKL_KI_KD':
+      case 'ALOKASI_WAKTU':
         if (k13AnalysisCount === 0) {
           missingFields.push('Data Analisis SKL, KI, dan KD K13 belum terisi');
         }
@@ -431,7 +433,7 @@ export function validateDocumentRequirements(
       }
 
       case 'ALOKASI_WAKTU': {
-        const projection = buildPromesProjection(context as DocumentGenerationContext);
+        const projection = buildAlokasiWaktuProjection(context as DocumentGenerationContext);
         if (!projection.isReady) {
           missingFields.push(
             projection.unreadyReason ||
