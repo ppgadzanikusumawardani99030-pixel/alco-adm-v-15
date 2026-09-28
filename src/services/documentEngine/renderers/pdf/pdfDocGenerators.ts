@@ -759,11 +759,66 @@ export async function generatePdfDocument(
     }
 
     case 'ALOKASI_WAKTU': {
+      const isK13 = academicSetting?.curriculumType === 'K13' || academicSetting?.curriculum === 'Kurikulum 2013';
+
+      if (isK13) {
+        title = 'Distribusi Alokasi Waktu Pembelajaran';
+        subTitle = `${subject} — ${grade} — Semester ${semester}`;
+        fileName = `Alokasi_Waktu_${cleanSubject}_${cleanGrade}.pdf`;
+
+        const allocs = timeAllocations || [];
+        const rows = isBlankMode
+          ? Array.from({ length: 15 }, (_, idx) => [
+              idx + 1,
+              `KD ${idx + 1}`,
+              '..........................................................................................',
+              '...............',
+              '..... JP',
+              '....................',
+            ])
+          : allocs.map((a, idx) => [
+              idx + 1,
+              a.sourceId || `KD ${idx + 1}`,
+              a.notes || '—',
+              a.weekNumber ? `Pekan ke-${a.weekNumber}` : '—',
+              a.jp != null ? `${a.jp} JP` : '—',
+              a.notes || '—',
+            ]);
+
+        sections.push({
+          type: 'table',
+          columns: [
+            { header: 'No', dataKey: 'no', width: 12, align: 'center' },
+            { header: 'Kode KD', dataKey: 'code', width: 22, align: 'center' },
+            { header: 'Lingkup Materi / Topik', dataKey: 'topic', width: 70 },
+            { header: 'Alokasi Pekan', dataKey: 'wks', width: 25, align: 'center' },
+            { header: 'Jam Pelajaran', dataKey: 'jp', width: 25, align: 'center' },
+            { header: 'Distribusi Waktu Mengajar', dataKey: 'dist', width: 35 },
+          ],
+          rows,
+        });
+        break;
+      }
+
+      const projection = buildPromesProjection(context);
+
+      if (!isBlankMode && !projection.isReady) {
+        throw new Error(
+          projection.unreadyReason ||
+            'Distribusi Alokasi Waktu belum dapat dibuat karena prasyarat semester aktif belum lengkap.'
+        );
+      }
+
       title = 'Distribusi Alokasi Waktu Pembelajaran';
-      subTitle = `${subject} — ${grade} — Semester ${semester}`;
+      subTitle = `${subject} — ${grade} — Semester ${projection.semester || semester} | Total ${projection.totalAllocatedJP} / ${projection.availableJP ?? 0} JP (${projection.validationStatus})`;
       fileName = `Alokasi_Waktu_${cleanSubject}_${cleanGrade}.pdf`;
 
-      const allocs = timeAllocations || [];
+      const allRows = [
+        ...projection.rows,
+        ...projection.assessmentRows,
+        ...projection.reserveRows,
+      ];
+
       const rows = isBlankMode
         ? Array.from({ length: 15 }, (_, idx) => [
             idx + 1,
@@ -773,40 +828,26 @@ export async function generatePdfDocument(
             '..... JP',
             '....................',
           ])
-        : allocs.length > 0
-        ? allocs.map((a, idx) => {
-            const matchingTp = (tp?.items || []).find((t) => t.id === a.tpId);
-            return [
-              idx + 1,
-              matchingTp?.code || `TP ${idx + 1}`,
-              matchingTp?.contentScope || matchingTp?.statement || a.notes || '—',
-              a.weekNumber ? `Pekan ke-${a.weekNumber}` : '—',
-              a.jp != null ? `${a.jp} JP` : '—',
-              a.notes || a.monthName || '—',
-            ];
-          })
-        : (atp?.items || []).map((it, idx) => {
-            const itJp = it.allocatedJP ?? it.jp;
-            const itJpDisplay = itJp != null ? `${itJp} JP` : '—';
-            return [
-              idx + 1,
-              it.tpCode || `TP ${idx + 1}`,
-              it.materialScope || it.tpStatement || '—',
-              '—',
-              itJpDisplay,
-              'Belum dialokasikan',
-            ];
-          });
+        : allRows.length > 0
+        ? allRows.map((r, idx) => [
+            idx + 1,
+            r.tpCode,
+            r.tpStatement,
+            r.materialScope || '—',
+            `${r.allocatedJP} JP`,
+            r.startWeek === r.endWeek ? `Pekan ${r.startWeek}` : `Pekan ${r.startWeek}–${r.endWeek}`,
+          ])
+        : [[1, '—', 'Belum ada alokasi waktu yang disusun.', '—', '—', '—']];
 
       sections.push({
         type: 'table',
         columns: [
-          { header: 'No', dataKey: 'no', width: 12, align: 'center' },
-          { header: 'Kode TP', dataKey: 'code', width: 22, align: 'center' },
-          { header: 'Lingkup Materi / Topik', dataKey: 'topic', width: 70 },
-          { header: 'Alokasi Pekan', dataKey: 'wks', width: 25, align: 'center' },
-          { header: 'Jam Pelajaran', dataKey: 'jp', width: 25, align: 'center' },
-          { header: 'Distribusi Waktu Mengajar', dataKey: 'dist', width: 35 },
+          { header: 'No', dataKey: 'no', width: 10, align: 'center' },
+          { header: 'Kode / Jenis', dataKey: 'code', width: 22, align: 'center' },
+          { header: 'Tujuan Pembelajaran / Kegiatan', dataKey: 'tp', width: 65 },
+          { header: 'Lingkup Materi', dataKey: 'mat', width: 45 },
+          { header: 'Alokasi JP', dataKey: 'jp', width: 18, align: 'center' },
+          { header: 'Distribusi Pekan', dataKey: 'wks', width: 22, align: 'center' },
         ],
         rows,
       });

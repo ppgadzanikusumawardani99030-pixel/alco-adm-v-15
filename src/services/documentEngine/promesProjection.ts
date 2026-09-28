@@ -73,6 +73,10 @@ const INDONESIAN_MONTH_NAMES: Record<number, string> = {
 /**
  * Pure Canonical PROMES Projection Builder
  */
+export function buildAlokasiWaktuProjection(context: DocumentGenerationContext): PromesProjection {
+  return buildPromesProjection(context);
+}
+
 export function buildPromesProjection(context: DocumentGenerationContext): PromesProjection {
   const { academicSetting, calendar, calendarDays = [], timeAllocations = [], atp, k13Analysis, semesterJPSetting, documentMode } = context;
 

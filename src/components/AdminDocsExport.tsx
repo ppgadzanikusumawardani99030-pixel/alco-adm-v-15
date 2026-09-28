@@ -1411,6 +1411,131 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
               );
             })()}
 
+            {/* ALOKASI WAKTU PREVIEW */}
+            {activePreviewType === 'ALOKASI_WAKTU' && (() => {
+              if (isK13Curriculum) {
+                const k13Items = k13Analysis?.items || [];
+                return (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <h5 className="font-bold text-slate-900 uppercase">Pemetaan Waktu Analisis Kompetensi Dasar (KD)</h5>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-[11px] border border-slate-300 border-collapse">
+                          <thead>
+                            <tr className="bg-blue-900 text-white font-semibold">
+                              <th className="p-1.5 border border-blue-800 text-center w-8">No</th>
+                              <th className="p-1.5 border border-blue-800 w-20">Kode KD</th>
+                              <th className="p-1.5 border border-blue-800 min-w-[160px]">Materi Pokok & Kegiatan</th>
+                              <th className="p-1.5 border border-blue-800 text-center w-16">Alokasi JP</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {k13Items.map((item, idx) => (
+                              <tr key={item.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                <td className="p-1.5 border border-slate-300 text-center font-bold">{idx + 1}</td>
+                                <td className="p-1.5 border border-slate-300 font-mono font-bold text-blue-900">{item.kd}</td>
+                                <td className="p-1.5 border border-slate-300">{item.materi || '-'}</td>
+                                <td className="p-1.5 border border-slate-300 text-center font-bold">{item.alokasiJp ? `${item.alokasiJp} JP` : '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              const projection = buildPromesProjection(context);
+              const allRows = [...projection.rows, ...projection.assessmentRows, ...projection.reserveRows];
+
+              if (!projection.isReady && documentMode !== 'blank') {
+                return (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs font-medium space-y-2">
+                    <div className="font-bold flex items-center gap-1.5 text-amber-900">
+                      <AlertCircle className="w-4 h-4 text-amber-600" />
+                      Prasyarat Distribusi Alokasi Waktu Belum Terpenuhi
+                    </div>
+                    <div>{projection.unreadyReason || 'Distribusi Alokasi Waktu belum dapat dibuat karena alokasi ATP semester aktif belum disusun.'}</div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-4">
+                  {/* Summary Header Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                    <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                      <div className="text-slate-500 font-medium">Beban JP/Minggu</div>
+                      <div className="font-bold text-slate-900">{projection.actualScheduledWeeklyJP !== null ? `${projection.actualScheduledWeeklyJP} JP` : '-'}</div>
+                    </div>
+                    <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                      <div className="text-slate-500 font-medium">Kapasitas Semester</div>
+                      <div className="font-bold text-slate-900">{projection.availableJP !== null ? `${projection.availableJP} JP` : '-'}</div>
+                    </div>
+                    <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                      <div className="text-slate-500 font-medium">Pekan Efektif</div>
+                      <div className="font-bold text-slate-900">{projection.effectiveWeeksEquivalent ?? '-'} Pekan</div>
+                    </div>
+                    <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                      <div className="text-slate-500 font-medium">Status Alokasi</div>
+                      <div className="font-bold text-blue-900 flex items-center justify-between">
+                        <span>{projection.validationStatus}</span>
+                        <span className="text-[10px] font-normal text-slate-500">({projection.totalAllocatedJP}/{projection.availableJP ?? 0} JP)</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h5 className="font-bold text-slate-900 uppercase">Rincian Pemetaan Distribusi Alokasi Waktu</h5>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-[11px] border border-slate-300 border-collapse">
+                        <thead>
+                          <tr className="bg-blue-900 text-white font-semibold">
+                            <th className="p-1.5 border border-blue-800 text-center w-8">No</th>
+                            <th className="p-1.5 border border-blue-800 w-20 text-center">Kode / Jenis</th>
+                            <th className="p-1.5 border border-blue-800 min-w-[160px]">Tujuan Pembelajaran / Kegiatan</th>
+                            <th className="p-1.5 border border-blue-800 min-w-[120px]">Lingkup Materi</th>
+                            <th className="p-1.5 border border-blue-800 text-center w-16">Alokasi JP</th>
+                            <th className="p-1.5 border border-blue-800 text-center w-24">Distribusi Pekan</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {allRows.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="p-4 text-center text-slate-400 italic">
+                                Belum ada alokasi waktu yang disusun pada semester ini.
+                              </td>
+                            </tr>
+                          ) : (
+                            allRows.map((item, idx) => (
+                              <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                <td className="p-1.5 border border-slate-300 text-center font-bold">{idx + 1}</td>
+                                <td className="p-1.5 border border-slate-300 text-center font-mono font-bold text-blue-900">{item.tpCode}</td>
+                                <td className="p-1.5 border border-slate-300">{item.tpStatement}</td>
+                                <td className="p-1.5 border border-slate-300">{item.materialScope || '-'}</td>
+                                <td className="p-1.5 border border-slate-300 text-center font-bold">{item.allocatedJP} JP</td>
+                                <td className="p-1.5 border border-slate-300 text-center font-medium">
+                                  {item.startWeek === item.endWeek ? `Pekan ${item.startWeek}` : `Pekan ${item.startWeek}–${item.endWeek}`}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                          <tr className="bg-slate-100 font-bold">
+                            <td colSpan={4} className="p-1.5 border border-slate-300 text-right">TOTAL ALOKASI JP:</td>
+                            <td className="p-1.5 border border-slate-300 text-center text-blue-900">{projection.totalAllocatedJP} JP</td>
+                            <td className="p-1.5 border border-slate-300 text-center text-slate-600">{projection.validationStatus}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* 4. MODUL AJAR PREVIEW */}
             {activePreviewType === 'MODUL_AJAR' && (() => {
               const activePlan = (learningPlans && learningPlans.length > 0)

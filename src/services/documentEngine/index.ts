@@ -430,6 +430,17 @@ export function validateDocumentRequirements(
         break;
       }
 
+      case 'ALOKASI_WAKTU': {
+        const projection = buildPromesProjection(context as DocumentGenerationContext);
+        if (!projection.isReady) {
+          missingFields.push(
+            projection.unreadyReason ||
+              'Distribusi Alokasi Waktu belum dapat dibuat karena pemetaan semester belum lengkap.'
+          );
+        }
+        break;
+      }
+
       case 'MODUL_AJAR': {
         const resolved = resolveCanonicalLearningPlan(context as DocumentGenerationContext);
         if (resolved.error) {
