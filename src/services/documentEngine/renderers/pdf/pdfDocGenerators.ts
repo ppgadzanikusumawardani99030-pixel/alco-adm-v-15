@@ -345,6 +345,13 @@ export async function generatePdfDocument(
     case 'PROMES': {
       const projection = buildPromesProjection(context);
 
+      if (context.documentMode !== 'blank' && !projection.isReady) {
+        throw new Error(
+          projection.unreadyReason ||
+            'Program Semester belum dapat dibuat karena prasyarat semester aktif belum lengkap.'
+        );
+      }
+
       title = 'Program Semester (PROMES)';
       subTitle = `${subject} — ${grade} — Semester ${projection.semester} — T.A ${academicYear} | Total ${projection.totalAllocatedJP} JP (${projection.validationStatus})`;
       fileName = `PROMES_${cleanSubject}_${cleanGrade}.pdf`;

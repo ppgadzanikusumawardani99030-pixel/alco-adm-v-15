@@ -88,9 +88,22 @@ export function buildPromesProjection(context: DocumentGenerationContext): Prome
     ? ['Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
     : ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni'];
 
-  // Actual Weekly JP Source
+  const activeSettingPlanId = academicSetting?.id;
+
+  // Defensive Semester Isolation for TimeAllocations
+  const scopedTimeAllocations = activeSettingPlanId
+    ? timeAllocations.filter((a) => !a.academicSettingId || a.academicSettingId === activeSettingPlanId)
+    : timeAllocations;
+
+  // Actual Weekly JP Source with SemesterJPSetting Scope Validation
   let actualScheduledWeeklyJP: number | null = null;
-  if (semesterJPSetting?.actualScheduledWeeklyJP && semesterJPSetting.actualScheduledWeeklyJP > 0) {
+  const isJpSettingScopeValid =
+    Boolean(semesterJPSetting) &&
+    (!semesterJPSetting?.semesterPlanId ||
+      !activeSettingPlanId ||
+      semesterJPSetting.semesterPlanId === activeSettingPlanId);
+
+  if (isJpSettingScopeValid && semesterJPSetting?.actualScheduledWeeklyJP && semesterJPSetting.actualScheduledWeeklyJP > 0) {
     actualScheduledWeeklyJP = semesterJPSetting.actualScheduledWeeklyJP;
   } else if (isK13) {
     actualScheduledWeeklyJP = academicSetting?.subjectWeeklyJP || academicSetting?.totalHoursPerWeek || null;
@@ -152,7 +165,7 @@ export function buildPromesProjection(context: DocumentGenerationContext): Prome
       unreadyReason = 'Program Semester belum dapat dibuat karena Jam Pelajaran (JP) aktual semester aktif belum ditetapkan.';
     } else if (!isK13) {
       const hasAtpItems = Boolean(atp?.items && atp.items.length > 0);
-      const atpAllocs = timeAllocations.filter(
+      const atpAllocs = scopedTimeAllocations.filter(
         (a) => a.sourceType === 'ATP_ITEM' || Boolean(a.atpItemId)
       );
 
@@ -310,7 +323,7 @@ export function buildPromesProjection(context: DocumentGenerationContext): Prome
     const atpItems = atp?.items || [];
     const atpItemMap = new Map(atpItems.map((item) => [item.id, item]));
 
-    for (const alloc of timeAllocations) {
+    for (const alloc of scopedTimeAllocations) {
       const isAtp = alloc.sourceType === 'ATP_ITEM' || Boolean(alloc.atpItemId);
       const isAssessment = alloc.sourceType === 'ASSESSMENT';
       const isReserve = alloc.sourceType === 'RESERVE';
@@ -375,8 +388,8 @@ export function buildPromesProjection(context: DocumentGenerationContext): Prome
     // KURIKULUM 2013 (K13)
     const k13Items = k13Analysis?.items || [];
 
-    if (timeAllocations.length > 0) {
-      for (const alloc of timeAllocations) {
+    if (scopedTimeAllocations.length > 0) {
+      for (const alloc of scopedTimeAllocations) {
         const jp = Number(alloc.allocatedJP ?? alloc.jp ?? 0);
         const startW = alloc.startWeek || alloc.weekNumber || 1;
         const endW = alloc.endWeek || startW;
@@ -452,24 +465,13 @@ export function buildPromesProjection(context: DocumentGenerationContext): Prome
     }
   }
 
-  // Calculate Totals & Validation Status
-  const totalAllocatedJP =
-    rows.reduce((sum, r) => sum + r.allocatedJP, 0) +
-    assessmentRows.reduce((sum, r) => sum + r.allocatedJP, 0) +
-    reserveRows.reduce((sum, r) => sum + r.allocatedJP, 0);
-
+  // Calculate Totals & Validation Status via validateTimeAllocations
   const avail = availableJP ?? 0;
-  const validationRes = validateTimeAllocations(timeAllocations, avail);
+  const validationRes = validateTimeAllocations(scopedTimeAllocations, avail);
 
-  const remainingJP = avail - totalAllocatedJP;
-  let validationStatus: PromesProjection['validationStatus'] = 'BALANCED';
-  if (remainingJP > 0) {
-    validationStatus = 'UNDER_ALLOCATED';
-  } else if (remainingJP < 0) {
-    validationStatus = 'OVER_ALLOCATED';
-  } else {
-    validationStatus = 'BALANCED';
-  }
+  const totalAllocatedJP = validationRes.totalAllocatedJP;
+  const remainingJP = validationRes.remainingJP;
+  const validationStatus: PromesProjection['validationStatus'] = validationRes.status;
 
   return {
     semester,

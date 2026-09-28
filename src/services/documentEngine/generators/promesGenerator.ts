@@ -30,6 +30,13 @@ export async function generatePROMES(context: DocumentGenerationContext): Promis
 
   const projection = buildPromesProjection(context);
 
+  if (context.documentMode !== 'blank' && !projection.isReady) {
+    throw new Error(
+      projection.unreadyReason ||
+        'Program Semester belum dapat dibuat karena prasyarat semester aktif belum lengkap.'
+    );
+  }
+
   const docChildren: (Paragraph | Table)[] = [];
 
   const semesterLabel = projection.semester === '1' ? 'Semester 1 (Ganjil)' : 'Semester 2 (Genap)';

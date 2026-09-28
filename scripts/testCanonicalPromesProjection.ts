@@ -17,6 +17,7 @@ import {
   buildPromesProjection,
   generatePROMES,
   generatePdfDocument,
+  validateDocumentRequirements,
   DocumentGenerationContext,
 } from '../src/services/documentEngine';
 import {
@@ -443,6 +444,168 @@ runTest('11 & 12. Annual ATP byte immutability and semester isolation in V5', ()
   const projS1 = buildPromesProjection(contextS1);
   assert.strictEqual(projS1.rows.length, 1);
   assert.strictEqual(projS1.rows[0].atpItemId, 'atp-1', 'S1 PROMES must NOT include S2 allocations (atp-4)');
+});
+
+// -----------------------------------------------------------------------------
+// HARDENING CASE 1: Calendar not confirmed -> Fail Closed
+// -----------------------------------------------------------------------------
+runTest('Hardening 1. Unconfirmed calendar causes buildPromesProjection.isReady = false, DOCX & PDF reject', async () => {
+  const unconfirmedCal: AcademicCalendar = {
+    ...s1Cal,
+    workflowStatus: 'UNRESOLVED',
+  };
+  const context: DocumentGenerationContext = {
+    school, profile, academicSetting: activeSetting, atp: sampleAnnualATP,
+    calendar: unconfirmedCal, calendarDays: s1Days,
+    timeAllocations: [
+      { id: 'alloc-1', academicSettingId: sem1.id, sourceType: 'ATP_ITEM', sourceId: 'atp-1', atpItemId: 'atp-1', allocatedJP: 12, jp: 12, startWeek: 1, endWeek: 3 },
+    ],
+    semesterJPSetting: { semesterPlanId: sem1.id, actualScheduledWeeklyJP: 5, source: 'TEACHER_CONFIRMED' },
+    documentMode: 'data',
+  };
+
+  const proj = buildPromesProjection(context);
+  assert.strictEqual(proj.isReady, false);
+  assert.ok(proj.unreadyReason?.includes('kalender pendidikan'));
+
+  await assert.rejects(async () => {
+    await generatePROMES(context);
+  }, /kalender pendidikan/);
+
+  await assert.rejects(async () => {
+    await generatePdfDocument('PROMES', context);
+  }, /kalender pendidikan/);
+});
+
+// -----------------------------------------------------------------------------
+// HARDENING CASE 2: SemesterJPSetting missing -> Fail Closed
+// -----------------------------------------------------------------------------
+runTest('Hardening 2. Missing SemesterJPSetting causes buildPromesProjection.isReady = false, DOCX & PDF reject', async () => {
+  const context: DocumentGenerationContext = {
+    school, profile, academicSetting: activeSetting, atp: sampleAnnualATP,
+    calendar: s1Cal, calendarDays: s1Days,
+    timeAllocations: [
+      { id: 'alloc-1', academicSettingId: sem1.id, sourceType: 'ATP_ITEM', sourceId: 'atp-1', atpItemId: 'atp-1', allocatedJP: 12, jp: 12, startWeek: 1, endWeek: 3 },
+    ],
+    semesterJPSetting: undefined,
+    documentMode: 'data',
+  };
+
+  const proj = buildPromesProjection(context);
+  assert.strictEqual(proj.isReady, false);
+  assert.ok(proj.unreadyReason?.includes('Jam Pelajaran'));
+
+  await assert.rejects(async () => {
+    await generatePROMES(context);
+  }, /Jam Pelajaran/);
+
+  await assert.rejects(async () => {
+    await generatePdfDocument('PROMES', context);
+  }, /Jam Pelajaran/);
+});
+
+// -----------------------------------------------------------------------------
+// HARDENING CASE 3: ATP TimeAllocation missing -> Fail Closed
+// -----------------------------------------------------------------------------
+runTest('Hardening 3. Missing ATP TimeAllocation causes buildPromesProjection.isReady = false, DOCX & PDF reject', async () => {
+  const context: DocumentGenerationContext = {
+    school, profile, academicSetting: activeSetting, atp: sampleAnnualATP,
+    calendar: s1Cal, calendarDays: s1Days,
+    timeAllocations: [],
+    semesterJPSetting: { semesterPlanId: sem1.id, actualScheduledWeeklyJP: 5, source: 'TEACHER_CONFIRMED' },
+    documentMode: 'data',
+  };
+
+  const proj = buildPromesProjection(context);
+  assert.strictEqual(proj.isReady, false);
+  assert.ok(proj.unreadyReason?.includes('alokasi ATP'));
+
+  await assert.rejects(async () => {
+    await generatePROMES(context);
+  }, /alokasi ATP/);
+
+  await assert.rejects(async () => {
+    await generatePdfDocument('PROMES', context);
+  }, /alokasi ATP/);
+});
+
+// -----------------------------------------------------------------------------
+// HARDENING CASE 4: Blank Mode Bypass
+// -----------------------------------------------------------------------------
+runTest('Hardening 4. Blank mode creates DOCX and PDF even without confirmed calendar or JP setting', async () => {
+  const context: DocumentGenerationContext = {
+    school, profile, academicSetting: activeSetting,
+    calendar: undefined,
+    calendarDays: [],
+    timeAllocations: [],
+    semesterJPSetting: undefined,
+    documentMode: 'blank',
+    skipDownload: true,
+  };
+
+  const docxRes = await generatePROMES(context);
+  assert.strictEqual(docxRes.success, true);
+
+  const pdfRes = await generatePdfDocument('PROMES', context);
+  assert.ok(pdfRes.blob);
+});
+
+// -----------------------------------------------------------------------------
+// HARDENING CASE 5: validateDocumentRequirements
+// -----------------------------------------------------------------------------
+runTest('Hardening 5. validateDocumentRequirements("PROMES") fails when readiness prerequisites are missing', () => {
+  const invalidContext: Partial<DocumentGenerationContext> = {
+    school, profile, academicSetting: activeSetting, atp: sampleAnnualATP,
+    calendar: s1Cal, calendarDays: s1Days,
+    timeAllocations: [],
+    semesterJPSetting: { semesterPlanId: sem1.id, actualScheduledWeeklyJP: 5, source: 'TEACHER_CONFIRMED' },
+    documentMode: 'data',
+  };
+
+  const valRes = validateDocumentRequirements('PROMES', invalidContext);
+  assert.strictEqual(valRes.isValid, false);
+  assert.ok(valRes.missingFields.some((f) => f.includes('alokasi ATP')));
+});
+
+// -----------------------------------------------------------------------------
+// HARDENING CASE 6: Mixed S1/S2 Input
+// -----------------------------------------------------------------------------
+runTest('Hardening 6. Projection defensively filters out timeAllocations from other semesters', () => {
+  const mixedAllocations: TimeAllocation[] = [
+    { id: 'alloc-s1', academicSettingId: sem1.id, sourceType: 'ATP_ITEM', sourceId: 'atp-1', atpItemId: 'atp-1', allocatedJP: 12, jp: 12, startWeek: 1, endWeek: 3 },
+    { id: 'alloc-s2', academicSettingId: sem2.id, sourceType: 'ATP_ITEM', sourceId: 'atp-4', atpItemId: 'atp-4', allocatedJP: 20, jp: 20, startWeek: 1, endWeek: 4 },
+  ];
+
+  const contextS1: DocumentGenerationContext = {
+    school, profile, academicSetting: activeSetting, atp: sampleAnnualATP,
+    calendar: s1Cal, calendarDays: s1Days,
+    timeAllocations: mixedAllocations,
+    semesterJPSetting: { semesterPlanId: sem1.id, actualScheduledWeeklyJP: 5, source: 'TEACHER_CONFIRMED' },
+    documentMode: 'data',
+  };
+
+  const proj = buildPromesProjection(contextS1);
+  assert.strictEqual(proj.rows.length, 1);
+  assert.strictEqual(proj.rows[0].atpItemId, 'atp-1');
+});
+
+// -----------------------------------------------------------------------------
+// HARDENING CASE 7: Wrong SemesterJPSetting Scope
+// -----------------------------------------------------------------------------
+runTest('Hardening 7. SemesterJPSetting for wrong semesterPlanId is rejected and causes fail closed', () => {
+  const context: DocumentGenerationContext = {
+    school, profile, academicSetting: activeSetting, atp: sampleAnnualATP,
+    calendar: s1Cal, calendarDays: s1Days,
+    timeAllocations: [
+      { id: 'alloc-1', academicSettingId: sem1.id, sourceType: 'ATP_ITEM', sourceId: 'atp-1', atpItemId: 'atp-1', allocatedJP: 12, jp: 12, startWeek: 1, endWeek: 3 },
+    ],
+    semesterJPSetting: { semesterPlanId: sem2.id, actualScheduledWeeklyJP: 5, source: 'TEACHER_CONFIRMED' },
+    documentMode: 'data',
+  };
+
+  const proj = buildPromesProjection(context);
+  assert.strictEqual(proj.actualScheduledWeeklyJP, null);
+  assert.strictEqual(proj.isReady, false);
 });
 
 console.log('\nAll Canonical PROMES Projection regression tests PASSED 100%!\n');

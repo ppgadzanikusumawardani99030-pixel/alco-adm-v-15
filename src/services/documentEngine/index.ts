@@ -28,6 +28,7 @@ import { validateLearningPlan } from '../learningPlanService';
 import { isValidDocumentDate } from '../documentDateService';
 import { validateKKTPData } from '../cpWorkflowService';
 import { checkAssessmentExportEligibility, isAssessmentDocumentSnapshot } from './assessmentExportService';
+import { buildPromesProjection } from './promesProjection';
 
 export * from './types';
 export * from './promesProjection';
@@ -413,11 +414,21 @@ export function validateDocumentRequirements(
         break;
 
       case 'PROTA':
-      case 'PROMES':
         if (atpCount === 0) {
           missingFields.push('Alur Tujuan Pembelajaran (ATP) belum disusun');
         }
         break;
+
+      case 'PROMES': {
+        const projection = buildPromesProjection(context as DocumentGenerationContext);
+        if (!projection.isReady) {
+          missingFields.push(
+            projection.unreadyReason ||
+              'Program Semester belum dapat dibuat karena prasyarat semester aktif belum lengkap.'
+          );
+        }
+        break;
+      }
 
       case 'MODUL_AJAR': {
         const resolved = resolveCanonicalLearningPlan(context as DocumentGenerationContext);
