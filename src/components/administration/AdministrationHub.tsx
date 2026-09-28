@@ -563,6 +563,7 @@ export const AdministrationHub: React.FC<AdministrationHubProps> = ({
             calendar={calendar}
             calendarDays={calendarDays}
             timeAllocations={timeAllocations}
+            semesterJPSetting={semesterJPSetting}
             attendanceSessions={attendanceSessions}
             attendanceRecords={attendanceRecords}
             assessmentCriteria={assessmentCriteria}

@@ -26,6 +26,7 @@ import {
   AssessmentPackage,
   DocumentMode,
   DocumentSnapshot,
+  SemesterJPSetting,
 } from '../../types';
 
 export type { DocumentType, DocumentMode, DocumentSnapshot, AppDocumentRecord };
@@ -46,6 +47,7 @@ export interface DocumentGenerationContext {
   calendar?: AcademicCalendar;
   calendarDays?: CalendarDay[];
   timeAllocations?: TimeAllocation[];
+  semesterJPSetting?: SemesterJPSetting;
   attendanceSessions?: AttendanceSession[];
   attendanceRecords?: AttendanceRecord[];
   assessmentCriteria?: AssessmentCriterion[];

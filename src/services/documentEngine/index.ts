@@ -30,6 +30,7 @@ import { validateKKTPData } from '../cpWorkflowService';
 import { checkAssessmentExportEligibility, isAssessmentDocumentSnapshot } from './assessmentExportService';
 
 export * from './types';
+export * from './promesProjection';
 export * from './snapshot';
 export * from './docxStyles';
 export * from './renderers/pdf/pdfRenderer';

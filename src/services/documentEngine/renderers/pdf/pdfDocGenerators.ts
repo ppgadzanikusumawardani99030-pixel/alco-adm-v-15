@@ -12,6 +12,7 @@ import { formatOfficialDate, PdfStyleProfile } from './pdfTheme';
 import { resolveEffectiveContext, createDocumentSnapshot } from '../../snapshot';
 import { exportAssessmentPdf } from '../../assessmentExportService';
 import { normalizeSemester } from '../../../academicScope';
+import { buildPromesProjection } from '../../promesProjection';
 
 export async function generatePdfDocument(
   type: DocumentType,
@@ -342,10 +343,29 @@ export async function generatePdfDocument(
     }
 
     case 'PROMES': {
+      const projection = buildPromesProjection(context);
+
       title = 'Program Semester (PROMES)';
-      subTitle = `${subject} — ${grade} — Semester ${semester} — T.A ${academicYear}`;
+      subTitle = `${subject} — ${grade} — Semester ${projection.semester} — T.A ${academicYear} | Total ${projection.totalAllocatedJP} JP (${projection.validationStatus})`;
       fileName = `PROMES_${cleanSubject}_${cleanGrade}.pdf`;
       orientation = 'landscape';
+
+      const months = projection.monthHeaders.map((m) => m.monthName);
+      const allRows = [...projection.rows, ...projection.assessmentRows, ...projection.reserveRows];
+
+      const pdfColumns = [
+        { header: 'No', dataKey: 'no', width: 12, align: 'center' as const },
+        { header: 'Kode', dataKey: 'code', width: 18, align: 'center' as const },
+        { header: 'Tujuan Pembelajaran', dataKey: 'tp', width: 65 },
+        { header: 'Materi', dataKey: 'mat', width: 45 },
+        { header: 'JP', dataKey: 'jp', width: 15, align: 'center' as const },
+        ...months.map((mName, idx) => ({
+          header: mName.slice(0, 3).toUpperCase(),
+          dataKey: `m${idx + 1}`,
+          width: 14,
+          align: 'center' as const,
+        })),
+      ];
 
       const rows = isBlankMode
         ? Array.from({ length: 15 }, (_, idx) => [
@@ -354,46 +374,20 @@ export async function generatePdfDocument(
             '..........................................................................................',
             '....................',
             '..... JP',
-            '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
+            ...months.map(() => '-'),
           ])
-        : (atp?.items || []).map((it, idx) => {
-            const itJp = it.allocatedJP ?? it.jp;
-            const itJpDisplay = itJp != null ? `${itJp} JP` : '—';
-            return [
-              idx + 1,
-              it.tpCode || `TP ${idx + 1}`,
-              it.tpStatement || '-',
-              it.materialScope || '-',
-              itJpDisplay,
-              '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
-            ];
-          });
+        : allRows.map((it, idx) => [
+            idx + 1,
+            it.tpCode || `TP ${idx + 1}`,
+            it.tpStatement || '-',
+            it.materialScope || '-',
+            `${it.allocatedJP} JP`,
+            ...months.map((mName) => (it.monthlyJP[mName] && it.monthlyJP[mName] > 0 ? `${it.monthlyJP[mName]}` : '-')),
+          ]);
 
       sections.push({
         type: 'table',
-        columns: [
-          { header: 'No', dataKey: 'no', width: 12, align: 'center' },
-          { header: 'Kode', dataKey: 'code', width: 18, align: 'center' },
-          { header: 'Tujuan Pembelajaran', dataKey: 'tp', width: 65 },
-          { header: 'Materi', dataKey: 'mat', width: 45 },
-          { header: 'JP', dataKey: 'jp', width: 15, align: 'center' },
-          { header: 'B1-1', dataKey: 'm1', width: 9, align: 'center' },
-          { header: 'B1-2', dataKey: 'm2', width: 9, align: 'center' },
-          { header: 'B1-3', dataKey: 'm3', width: 9, align: 'center' },
-          { header: 'B1-4', dataKey: 'm4', width: 9, align: 'center' },
-          { header: 'B2-1', dataKey: 'm5', width: 9, align: 'center' },
-          { header: 'B2-2', dataKey: 'm6', width: 9, align: 'center' },
-          { header: 'B2-3', dataKey: 'm7', width: 9, align: 'center' },
-          { header: 'B2-4', dataKey: 'm8', width: 9, align: 'center' },
-          { header: 'B3-1', dataKey: 'm9', width: 9, align: 'center' },
-          { header: 'B3-2', dataKey: 'm10', width: 9, align: 'center' },
-          { header: 'B3-3', dataKey: 'm11', width: 9, align: 'center' },
-          { header: 'B3-4', dataKey: 'm12', width: 9, align: 'center' },
-          { header: 'B4-1', dataKey: 'm13', width: 9, align: 'center' },
-          { header: 'B4-2', dataKey: 'm14', width: 9, align: 'center' },
-          { header: 'B4-3', dataKey: 'm15', width: 9, align: 'center' },
-          { header: 'B4-4', dataKey: 'm16', width: 9, align: 'center' },
-        ],
+        columns: pdfColumns,
         rows,
       });
       break;

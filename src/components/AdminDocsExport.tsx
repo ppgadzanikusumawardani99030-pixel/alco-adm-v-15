@@ -51,6 +51,7 @@ import {
   DocumentSnapshot,
   DocumentMode,
   WorkflowStepId,
+  SemesterJPSetting,
 } from '../types';
 import {
   DOCUMENT_CATALOG,
@@ -66,6 +67,7 @@ import {
   isContextDriftedFromSnapshot,
   ZipExportFormat,
   ZipExportResult,
+  buildPromesProjection,
 } from '../services/documentEngine';
 import { getCurriculumType } from '../services/curriculumRules';
 import { isK13 as isK13Check, getCurriculumDocumentTypes } from '../services/curriculumRouter';
@@ -85,6 +87,7 @@ interface AdminDocsExportProps {
   calendar?: AcademicCalendar;
   calendarDays?: CalendarDay[];
   timeAllocations?: TimeAllocation[];
+  semesterJPSetting?: SemesterJPSetting;
   attendanceSessions?: AttendanceSession[];
   attendanceRecords?: AttendanceRecord[];
   assessmentCriteria?: AssessmentCriterion[];
@@ -114,6 +117,7 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
   calendar,
   calendarDays,
   timeAllocations,
+  semesterJPSetting,
   attendanceSessions,
   attendanceRecords,
   assessmentCriteria,
@@ -182,6 +186,7 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
     calendar,
     calendarDays,
     timeAllocations,
+    semesterJPSetting,
     attendanceSessions,
     attendanceRecords,
     assessmentCriteria,
@@ -1330,45 +1335,81 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
             )}
 
             {/* 3. PROMES PREVIEW */}
-            {activePreviewType === 'PROMES' && (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <h5 className="font-bold text-slate-900 uppercase">Matriks Distribusi Jam Pembelajaran Mingguan per Bulan</h5>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-[10px] border border-slate-300 border-collapse">
-                      <thead>
-                        <tr className="bg-blue-900 text-white font-semibold">
-                          <th className="p-1 border border-blue-800 text-center w-6">No</th>
-                          <th className="p-1 border border-blue-800 w-12">Kode</th>
-                          <th className="p-1 border border-blue-800 min-w-[120px]">Tujuan Pembelajaran</th>
-                          <th className="p-1 border border-blue-800 text-center w-10">JP</th>
-                          {semesterMonths.map((m) => (
-                            <th key={m} className="p-1 border border-blue-800 text-center w-10">
-                              {m.slice(0, 3)}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(atp?.items || []).map((item, idx) => (
-                          <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                            <td className="p-1 border border-slate-300 text-center font-bold">{idx + 1}</td>
-                            <td className="p-1 border border-slate-300 font-mono font-bold text-blue-900">{item.tpCode}</td>
-                            <td className="p-1 border border-slate-300 truncate max-w-[140px]">{item.tpStatement}</td>
-                            <td className="p-1 border border-slate-300 text-center font-bold">{item.jp || 4}</td>
-                            {semesterMonths.map((_, mIdx) => (
-                              <td key={mIdx} className="p-1 border border-slate-300 text-center">
-                                {mIdx === idx % 6 ? `${item.jp || 4}` : '-'}
-                              </td>
+            {activePreviewType === 'PROMES' && (() => {
+              const promesProj = buildPromesProjection(context);
+              const months = promesProj.monthHeaders.map((m) => m.monthName);
+              const allRows = [...promesProj.rows, ...promesProj.assessmentRows, ...promesProj.reserveRows];
+
+              if (!promesProj.isReady && documentMode !== 'blank') {
+                return (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs font-medium space-y-2">
+                    <div className="font-bold flex items-center gap-1.5 text-amber-900">
+                      <AlertCircle className="w-4 h-4 text-amber-600" />
+                      Prasyarat Program Semester Belum Terpenuhi
+                    </div>
+                    <div>{promesProj.unreadyReason || 'Program Semester belum dapat dibuat karena alokasi ATP semester aktif belum disusun.'}</div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h5 className="font-bold text-slate-900 uppercase">Matriks Distribusi Jam Pembelajaran Mingguan per Bulan</h5>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                        promesProj.validationStatus === 'BALANCED'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : promesProj.validationStatus === 'UNDER_ALLOCATED'
+                          ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : 'bg-rose-50 text-rose-700 border-rose-200'
+                      }`}>
+                        {promesProj.validationStatus} ({promesProj.totalAllocatedJP} / {promesProj.availableJP ?? 0} JP)
+                      </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-[10px] border border-slate-300 border-collapse">
+                        <thead>
+                          <tr className="bg-blue-900 text-white font-semibold">
+                            <th className="p-1 border border-blue-800 text-center w-6">No</th>
+                            <th className="p-1 border border-blue-800 w-12">Kode</th>
+                            <th className="p-1 border border-blue-800 min-w-[120px]">Tujuan Pembelajaran</th>
+                            <th className="p-1 border border-blue-800 text-center w-10">JP</th>
+                            {months.map((m) => (
+                              <th key={m} className="p-1 border border-blue-800 text-center w-10">
+                                {m.slice(0, 3)}
+                              </th>
                             ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {allRows.map((item, idx) => (
+                            <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                              <td className="p-1 border border-slate-300 text-center font-bold">{idx + 1}</td>
+                              <td className="p-1 border border-slate-300 font-mono font-bold text-blue-900">{item.tpCode}</td>
+                              <td className="p-1 border border-slate-300 truncate max-w-[140px]">{item.tpStatement}</td>
+                              <td className="p-1 border border-slate-300 text-center font-bold">{item.allocatedJP}</td>
+                              {months.map((mName) => (
+                                <td key={mName} className="p-1 border border-slate-300 text-center font-medium">
+                                  {item.monthlyJP[mName] && item.monthlyJP[mName] > 0 ? `${item.monthlyJP[mName]}` : '-'}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                          <tr className="bg-slate-100 font-bold">
+                            <td colSpan={3} className="p-1 border border-slate-300 text-right">TOTAL ALOKASI JP TERCATAT:</td>
+                            <td className="p-1 border border-slate-300 text-center text-blue-900">{promesProj.totalAllocatedJP} JP</td>
+                            {months.map((mName) => (
+                              <td key={mName} className="p-1 border border-slate-300 text-center text-slate-500">-</td>
+                            ))}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* 4. MODUL AJAR PREVIEW */}
             {activePreviewType === 'MODUL_AJAR' && (() => {

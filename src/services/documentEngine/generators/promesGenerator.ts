@@ -23,88 +23,17 @@ import {
   DOCX_FONT,
   DOCX_COLOR_BLACK,
 } from '../docxStyles';
-import { getSubjectJP, calculateAvailableJP, calculateEffectiveDays, normalizeLearningAllocation, getEffectiveWeeksList } from '../../jpEngine';
+import { buildPromesProjection } from '../promesProjection';
 
 export async function generatePROMES(context: DocumentGenerationContext): Promise<GeneratedDocumentResult> {
-  const { school, profile, academicSetting, atp, calendar, calendarDays, timeAllocations } = context;
+  const { school, profile, academicSetting } = context;
+
+  const projection = buildPromesProjection(context);
 
   const docChildren: (Paragraph | Table)[] = [];
 
-  const isSemesterGanjil =
-    academicSetting.semester?.includes('1') || academicSetting.semester?.toLowerCase().includes('ganjil');
-  const semesterLabel = isSemesterGanjil ? 'Semester 1 (Ganjil)' : 'Semester 2 (Genap)';
-  const months = isSemesterGanjil
-    ? ['Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
-    : ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni'];
-
-  // Look up verified official rule
-  const officialRule = getSubjectJP({
-    curriculum: academicSetting.curriculum,
-    level: academicSetting.level,
-    grade: academicSetting.grade,
-    subject: academicSetting.subject,
-  });
-
-  const weeklyJP = academicSetting.subjectWeeklyJP || academicSetting.totalHoursPerWeek || officialRule.weeklyJP || null;
-
-  // Read calendar strictly from context
-  const hasCalendar = !!(calendar?.startDate && calendar?.endDate);
-
-  let effectiveDaysCount = 0;
-  let effectiveWeeksCount = 0;
-  let availableJPCount = 0;
-  let calendarStatusNote = 'Data kalender satuan pendidikan terhubung';
-
-  if (hasCalendar && calendar) {
-    const effectiveResult = calculateEffectiveDays(calendar, calendarDays || []);
-    effectiveDaysCount = effectiveResult.effectiveLearningDays;
-    const availableJP = calculateAvailableJP({
-      subjectWeeklyJP: weeklyJP || 0,
-      effectiveLearningDays: effectiveDaysCount,
-      schoolDaysPerWeek: calendar.schoolDaysPerWeek,
-      semester: semesterLabel,
-      academicYear: academicSetting.academicYear,
-      level: academicSetting.level,
-      grade: academicSetting.grade,
-      subject: academicSetting.subject,
-      officialAnnualJP: officialRule.annualJP,
-    });
-    effectiveWeeksCount = availableJP.effectiveWeeksRounded ?? 0;
-    availableJPCount = availableJP.availableJP ?? 0;
-  } else {
-    calendarStatusNote = 'Data kalender belum dikonfigurasi pada sistem';
-  }
-
-  const effectiveWeeksList = hasCalendar ? getEffectiveWeeksList(calendar, calendarDays || []) : [];
-
-  // Helper for Month Resolution
-  const resolveMonthIndex = (alloc?: { month?: number; startWeek?: number }): number | null => {
-    if (!alloc) return null;
-
-    if (alloc.month && alloc.month >= 1 && alloc.month <= 6) {
-      return alloc.month - 1;
-    }
-    if (alloc.month && alloc.month >= 7 && alloc.month <= 12) {
-      return isSemesterGanjil ? alloc.month - 7 : (!isSemesterGanjil ? alloc.month - 1 : null);
-    }
-
-    if (alloc.startWeek && alloc.startWeek > 0 && effectiveWeeksList.length > 0) {
-      const match = effectiveWeeksList.find(w => w.weekIndex === alloc.startWeek);
-      if (match) {
-        const calMonth = match.month;
-        if (isSemesterGanjil && calMonth >= 7 && calMonth <= 12) {
-          return calMonth - 7;
-        } else if (!isSemesterGanjil && calMonth >= 1 && calMonth <= 6) {
-          return calMonth - 1;
-        }
-      }
-    }
-
-    return null;
-  };
-
-  // Normalize all allocations from context
-  const normalizedAllocations = (timeAllocations || []).map(normalizeLearningAllocation);
+  const semesterLabel = projection.semester === '1' ? 'Semester 1 (Ganjil)' : 'Semester 2 (Genap)';
+  const months = projection.monthHeaders.map((m) => m.monthName);
 
   // 1. Header
   docChildren.push(
@@ -115,12 +44,25 @@ export async function generatePROMES(context: DocumentGenerationContext): Promis
   );
 
   // 2. Identity Box
+  const weeklyJpText =
+    projection.actualScheduledWeeklyJP !== null
+      ? `${projection.actualScheduledWeeklyJP} JP / Minggu`
+      : 'Input Manual Diperlukan';
+
+  const weeksText =
+    projection.effectiveWeeksEquivalent !== null
+      ? `${projection.effectiveWeeksEquivalent} Minggu (${projection.effectiveLearningDays || 0} Hari Efektif)`
+      : 'Data kalender belum dikonfigurasi pada sistem';
+
+  const availableJpText =
+    projection.availableJP !== null ? `${projection.availableJP} JP` : '-';
+
   docChildren.push(
     createIdentityMetadataTable(school, profile, academicSetting, [
-      ['Alokasi Intrakurikuler per Minggu', `: ${weeklyJP !== null ? `${weeklyJP} JP / Minggu` : 'Input Manual Diperlukan'}`],
-      ['Minggu Efektif Semester', `: ${hasCalendar ? `${effectiveWeeksCount} Minggu (${effectiveDaysCount} Hari Efektif)` : calendarStatusNote}`],
-      ['Total Kapasitas JP Tersedia', `: ${hasCalendar ? `${availableJPCount} JP` : '-'}`],
-      ['Dasar Regulasi Struktur', `: ${officialRule.regulation || 'Struktur Kustom Guru'}`],
+      ['Alokasi Intrakurikuler per Minggu', `: ${weeklyJpText}`],
+      ['Minggu Efektif Semester', `: ${weeksText}`],
+      ['Total Kapasitas JP Tersedia', `: ${availableJpText}`],
+      ['Status Alokasi Waktu', `: ${projection.validationStatus}`],
     ])
   );
   docChildren.push(new Paragraph({ spacing: { after: 180 } }));
@@ -130,7 +72,7 @@ export async function generatePROMES(context: DocumentGenerationContext): Promis
     createSectionHeading('Matriks Distribusi Alokasi Waktu Pembelajaran Bulanan', 1)
   );
 
-  const isK13Curriculum = academicSetting.curriculumType === 'K13' || academicSetting.curriculum === 'Kurikulum 2013';
+  const isK13Curriculum = projection.curriculumType === 'K13';
   const monthHeaderCells = months.map((m) => createTableHeaderCell(m, 7));
 
   const tableHeaderRow1 = new TableRow({
@@ -148,122 +90,37 @@ export async function generatePROMES(context: DocumentGenerationContext): Promis
     ],
   });
 
-  let totalAllocatedJPSum = 0;
-  let dataRows: TableRow[] = [];
+  const allRows = [...projection.rows, ...projection.assessmentRows, ...projection.reserveRows];
 
-  if (isK13Curriculum) {
-    const k13Items = context.k13Analysis?.items || [];
-    dataRows = k13Items.map((item, idx) => {
-      const matchingAlloc = normalizedAllocations.find(
-        (a) => a.sourceId === item.id || a.sourceId === item.kd
-      );
-
-      const allocatedJP = matchingAlloc?.allocatedJP ?? (item.alokasiJp ? Number(item.alokasiJp) : null);
-      if (allocatedJP !== null) {
-        totalAllocatedJPSum += allocatedJP;
-      }
-
-      const targetMonthIdx = resolveMonthIndex(matchingAlloc);
-
-      const monthDistributionCells = months.map((_, mIdx) => {
-        const isTarget = targetMonthIdx !== null && mIdx === targetMonthIdx;
-        return createTableDataCell(isTarget && allocatedJP !== null ? `${allocatedJP}` : '-', 7, AlignmentType.CENTER);
-      });
-
-      return new TableRow({
-        children: [
-          createTableDataCell(`${idx + 1}`, 5, AlignmentType.CENTER),
-          createTableDataCell(item.kd, 15, AlignmentType.LEFT, true),
-          new TableCell({
-            width: { size: 28, type: WidthType.PERCENTAGE },
-            margins: { top: 100, bottom: 100, left: 120, right: 120 },
-            children: [
-              new Paragraph({
-                spacing: { line: 240, after: 0 },
-                children: [
-                  new TextRun({ text: item.indikator || item.materi || '-', size: 20, font: DOCX_FONT, color: DOCX_COLOR_BLACK }),
-                  item.materi
-                    ? new TextRun({ text: `\nMateri: ${item.materi}`, italics: true, size: 20, font: DOCX_FONT, color: DOCX_COLOR_BLACK })
-                    : new TextRun({ text: '' }),
-                ],
-              }),
-            ],
-          }),
-          createTableDataCell(allocatedJP !== null ? `${allocatedJP} JP` : '-', 10, AlignmentType.CENTER, true),
-          ...monthDistributionCells,
-        ],
-      });
+  const dataRows: TableRow[] = allRows.map((row, idx) => {
+    const monthDistributionCells = months.map((mName) => {
+      const jp = row.monthlyJP[mName];
+      return createTableDataCell(jp && jp > 0 ? `${jp}` : '-', 7, AlignmentType.CENTER);
     });
-  } else {
-    const items = atp?.items && atp.items.length > 0 ? atp.items : [];
 
-    dataRows = items.map((item, idx) => {
-      const matchingAlloc = normalizedAllocations.find(
-        (a) => a.sourceId === item.id || a.sourceId === item.tpCode || a.tpId === item.id || a.atpItemId === item.id
-      );
-
-      const allocatedJP = matchingAlloc?.allocatedJP ?? (item.jp ? Number(item.jp) : null);
-      if (allocatedJP !== null) {
-        totalAllocatedJPSum += allocatedJP;
-      }
-
-      const targetMonthIdx = resolveMonthIndex(matchingAlloc);
-
-      const monthDistributionCells = months.map((_, mIdx) => {
-        const isTarget = targetMonthIdx !== null && mIdx === targetMonthIdx;
-        return createTableDataCell(isTarget && allocatedJP !== null ? `${allocatedJP}` : '-', 7, AlignmentType.CENTER);
-      });
-
-      return new TableRow({
-        children: [
-          createTableDataCell(`${idx + 1}`, 5, AlignmentType.CENTER),
-          createTableDataCell(item.tpCode || `TP.${idx + 1}`, 10, AlignmentType.CENTER, true),
-          new TableCell({
-            width: { size: 33, type: WidthType.PERCENTAGE },
-            margins: { top: 100, bottom: 100, left: 120, right: 120 },
-            children: [
-              new Paragraph({
-                spacing: { line: 240, after: 0 },
-                children: [
-                  new TextRun({ text: item.tpStatement, size: 20, font: DOCX_FONT, color: DOCX_COLOR_BLACK }),
-                  item.materialScope
-                    ? new TextRun({ text: `\nMateri: ${item.materialScope}`, italics: true, size: 20, font: DOCX_FONT, color: DOCX_COLOR_BLACK })
-                    : new TextRun({ text: '' }),
-                ],
-              }),
-            ],
-          }),
-          createTableDataCell(allocatedJP !== null ? `${allocatedJP} JP` : '-', 10, AlignmentType.CENTER, true),
-          ...monthDistributionCells,
-        ],
-      });
+    return new TableRow({
+      children: [
+        createTableDataCell(`${idx + 1}`, 5, AlignmentType.CENTER),
+        createTableDataCell(row.tpCode || `TP.${idx + 1}`, isK13Curriculum ? 15 : 10, AlignmentType.CENTER, true),
+        new TableCell({
+          width: { size: isK13Curriculum ? 28 : 33, type: WidthType.PERCENTAGE },
+          margins: { top: 100, bottom: 100, left: 120, right: 120 },
+          children: [
+            new Paragraph({
+              spacing: { line: 240, after: 0 },
+              children: [
+                new TextRun({ text: row.tpStatement, size: 20, font: DOCX_FONT, color: DOCX_COLOR_BLACK }),
+                row.materialScope && row.materialScope !== '-'
+                  ? new TextRun({ text: `\nMateri: ${row.materialScope}`, italics: true, size: 20, font: DOCX_FONT, color: DOCX_COLOR_BLACK })
+                  : new TextRun({ text: '' }),
+              ],
+            }),
+          ],
+        }),
+        createTableDataCell(`${row.allocatedJP} JP`, 10, AlignmentType.CENTER, true),
+        ...monthDistributionCells,
+      ],
     });
-  }
-
-  // Explicit Assessment Allocations ONLY
-  const assessmentAllocs = normalizedAllocations.filter((a) => a.sourceType === 'ASSESSMENT');
-  const assessmentRows: TableRow[] = [];
-
-  assessmentAllocs.forEach((aAlloc, aIdx) => {
-    const aJp = aAlloc.allocatedJP || 0;
-    totalAllocatedJPSum += aJp;
-    const aMonthIdx = resolveMonthIndex(aAlloc);
-
-    const aMonthCells = months.map((_, mIdx) =>
-      createTableDataCell(aMonthIdx !== null && mIdx === aMonthIdx ? `${aJp}` : '-', 7, AlignmentType.CENTER)
-    );
-
-    assessmentRows.push(
-      new TableRow({
-        children: [
-          createTableDataCell(`${dataRows.length + aIdx + 1}`, 5, AlignmentType.CENTER),
-          createTableDataCell('ASESMEN', isK13Curriculum ? 15 : 10, AlignmentType.CENTER),
-          createTableDataCell(aAlloc.notes || 'Asesmen Sumatif / Evaluasi Pembelajaran', isK13Curriculum ? 28 : 33),
-          createTableDataCell(`${aJp} JP`, 10, AlignmentType.CENTER, true),
-          ...aMonthCells,
-        ],
-      })
-    );
   });
 
   // Total Summary Row
@@ -290,28 +147,27 @@ export async function generatePROMES(context: DocumentGenerationContext): Promis
           }),
         ],
       }),
-      createTableDataCell(`${totalAllocatedJPSum} JP`, 10, AlignmentType.CENTER, true),
+      createTableDataCell(`${projection.totalAllocatedJP} JP`, 10, AlignmentType.CENTER, true),
       ...totalMonthCells,
     ],
   });
 
   const promesTable = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
-    rows: [tableHeaderRow1, ...dataRows, ...assessmentRows, totalRow],
+    rows: [tableHeaderRow1, ...dataRows, totalRow],
   });
 
   docChildren.push(promesTable);
 
   // Keterangan Pelaksanaan & Status Alokasi
-  const remainingJP = hasCalendar ? availableJPCount - totalAllocatedJPSum : null;
   let allocationStatusText = 'Belum dilakukan verifikasi kalender.';
-  if (remainingJP !== null) {
-    if (remainingJP > 0) {
-      allocationStatusText = `Sisa JP Belum Dialokasikan: ${remainingJP} JP dari kapasitas ${availableJPCount} JP.`;
-    } else if (remainingJP === 0) {
-      allocationStatusText = `Alokasi Seimbang: Tepat ${totalAllocatedJPSum} JP sesuai kapasitas tersedia.`;
-    } else {
-      allocationStatusText = `Defisit JP: Alokasi (${totalAllocatedJPSum} JP) melebihi kapasitas tersedia (${availableJPCount} JP) sebesar ${Math.abs(remainingJP)} JP.`;
+  if (projection.availableJP !== null) {
+    if (projection.validationStatus === 'UNDER_ALLOCATED') {
+      allocationStatusText = `Sisa JP Belum Dialokasikan: ${projection.remainingJP} JP dari kapasitas ${projection.availableJP} JP.`;
+    } else if (projection.validationStatus === 'BALANCED') {
+      allocationStatusText = `Alokasi Seimbang: Tepat ${projection.totalAllocatedJP} JP sesuai kapasitas tersedia.`;
+    } else if (projection.validationStatus === 'OVER_ALLOCATED') {
+      allocationStatusText = `Defisit JP: Alokasi (${projection.totalAllocatedJP} JP) melebihi kapasitas tersedia (${projection.availableJP} JP) sebesar ${Math.abs(projection.remainingJP)} JP.`;
     }
   }
 

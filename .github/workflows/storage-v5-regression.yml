@@ -97,6 +97,9 @@ jobs:
       - name: Test Automatic Semester Time Allocation
         run: npx tsx scripts/testAutoSemesterTimeAllocation.ts
 
+      - name: Test Canonical PROMES Projection
+        run: npx tsx scripts/testCanonicalPromesProjection.ts
+
       - name: Test Profile School Binding V5
         run: npx tsx scripts/testProfileSchoolBindingV5.ts
 
