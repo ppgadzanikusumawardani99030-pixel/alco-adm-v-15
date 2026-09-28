@@ -19,6 +19,7 @@ import {
   calculateAvailableJP,
   getSubjectJP,
   resolveSemester,
+  validateTimeAllocations,
 } from '../../services/jpEngine';
 import {
   resolveOfficialCalendar,
@@ -793,14 +794,129 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
     }
   };
 
+  const handleUpdateAtpAllocation = (
+    itemId: string,
+    field: 'allocatedJP' | 'startWeek' | 'endWeek',
+    value: number | null
+  ) => {
+    setAllocations((prev) => {
+      const existingIndex = prev.findIndex(
+        (a) =>
+          (a.sourceType === 'ATP_ITEM' && a.sourceId === itemId) ||
+          a.atpItemId === itemId ||
+          a.sourceId === itemId
+      );
+      const existing = existingIndex >= 0 ? prev[existingIndex] : undefined;
+
+      // Updating allocatedJP
+      if (field === 'allocatedJP') {
+        if (value === null || value === undefined || isNaN(value) || value <= 0) {
+          // If JP is empty, 0, or invalid: remove allocation (unallocated)
+          if (existingIndex >= 0) {
+            return prev.filter((_, idx) => idx !== existingIndex);
+          }
+          return prev;
+        }
+
+        const defaultStart = existing?.startWeek ?? existing?.weekNumber ?? 1;
+        const defaultEnd = existing?.endWeek ?? defaultStart;
+        const newAlloc: TimeAllocation = {
+          id: existing?.id || `alloc-${Date.now()}-${itemId}`,
+          academicSettingId: academicSetting.id,
+          sourceType: 'ATP_ITEM',
+          sourceId: itemId,
+          atpItemId: itemId,
+          semester: semester ? (semester === '1' ? '1 (Ganjil)' : '2 (Genap)') : undefined,
+          startWeek: defaultStart,
+          endWeek: defaultEnd,
+          weekNumber: defaultStart,
+          jp: value,
+          allocatedJP: value,
+        };
+
+        if (existingIndex >= 0) {
+          const copy = [...prev];
+          copy[existingIndex] = newAlloc;
+          return copy;
+        } else {
+          return [...prev, newAlloc];
+        }
+      }
+
+      // Updating startWeek
+      if (field === 'startWeek') {
+        if (!existing) {
+          // Do not create allocation until JP is entered
+          return prev;
+        }
+        let newStart = value && value >= 1 ? value : 1;
+        if (effectiveWeeks && effectiveWeeks > 0 && newStart > effectiveWeeks) {
+          newStart = effectiveWeeks;
+        }
+        let newEnd = existing.endWeek ?? newStart;
+        if (newEnd < newStart) {
+          newEnd = newStart;
+        }
+
+        const copy = [...prev];
+        copy[existingIndex] = {
+          ...existing,
+          startWeek: newStart,
+          endWeek: newEnd,
+          weekNumber: newStart,
+        };
+        return copy;
+      }
+
+      // Updating endWeek
+      if (field === 'endWeek') {
+        if (!existing) {
+          // Do not create allocation until JP is entered
+          return prev;
+        }
+        const currentStart = existing.startWeek ?? existing.weekNumber ?? 1;
+        let newEnd = value && value >= currentStart ? value : currentStart;
+        if (effectiveWeeks && effectiveWeeks > 0 && newEnd > effectiveWeeks) {
+          newEnd = effectiveWeeks;
+        }
+
+        const copy = [...prev];
+        copy[existingIndex] = {
+          ...existing,
+          endWeek: newEnd,
+        };
+        return copy;
+      }
+
+      return prev;
+    });
+  };
+
+  const handleRemoveAtpAllocation = (itemId: string) => {
+    setAllocations((prev) =>
+      prev.filter(
+        (a) =>
+          !(
+            (a.sourceType === 'ATP_ITEM' && a.sourceId === itemId) ||
+            a.atpItemId === itemId ||
+            a.sourceId === itemId
+          )
+      )
+    );
+  };
+
   const handleWeekChange = (itemId: string, week: number) => {
     setAllocations((prev) => {
       const existingIndex = prev.findIndex(
         (a) =>
+          (a.sourceType === 'KD' && a.sourceId === itemId) ||
           a.sourceId === itemId ||
           a.atpItemId === itemId ||
           a.tpId === itemId
       );
+      const k13Item = k13Analysis?.items?.find((i) => i.id === itemId);
+      const defaultJP = k13Item?.alokasiJp ? Number(k13Item.alokasiJp) : (jpPerWeek || 0);
+
       if (existingIndex >= 0) {
         const updated = [...prev];
         updated[existingIndex] = {
@@ -811,24 +927,17 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
         };
         return updated;
       } else {
-        const currAtpItem = atp?.items?.find((i) => i.id === itemId);
-        const allocatedVal = isK13Curriculum
-          ? jpPerWeek || 0
-          : currAtpItem?.jp
-          ? Number(currAtpItem.jp)
-          : jpPerWeek || 0;
         const newAlloc: TimeAllocation = {
           id: `alloc-${Date.now()}-${itemId}`,
           academicSettingId: academicSetting.id,
-          sourceType: isK13Curriculum ? 'KD' : 'ATP_ITEM',
+          sourceType: 'KD',
           sourceId: itemId,
           semester: semester ? (semester === '1' ? '1 (Ganjil)' : '2 (Genap)') : undefined,
-          atpItemId: !isK13Curriculum ? itemId : undefined,
           weekNumber: week,
           startWeek: week,
           endWeek: week,
-          jp: allocatedVal,
-          allocatedJP: allocatedVal,
+          jp: defaultJP,
+          allocatedJP: defaultJP,
         };
         return [...prev, newAlloc];
       }
@@ -1948,76 +2057,247 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto border border-slate-200 rounded-lg">
-              <table className="w-full text-left text-xs text-slate-700">
-                <thead className="bg-slate-100 text-slate-800 font-semibold border-b border-slate-200">
-                  <tr>
-                    <th className="py-2.5 px-3 w-12 text-center">No</th>
-                    <th className="py-2.5 px-3 w-28">Kode TP</th>
-                    <th className="py-2.5 px-3">Tujuan Pembelajaran &amp; Ruang Lingkup Materi</th>
-                    <th className="py-2.5 px-3 w-24 text-center">Beban JP</th>
-                    <th className="py-2.5 px-3 w-40 text-center">Penempatan Pekan</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {(atp.items || []).map((item, index) => {
-                    const matchedAlloc = allocations.find(
-                      (a) =>
-                        (a.sourceType === 'ATP_ITEM' && a.sourceId === item.id) ||
-                        a.atpItemId === item.id ||
-                        a.sourceId === item.id ||
-                        a.tpId === item.tpId
-                    );
-                    const defaultWeek = effectiveWeeks
-                      ? Math.min(effectiveWeeks, index + 1)
-                      : index + 1;
-                    const currentWeek = matchedAlloc?.weekNumber || defaultWeek;
-                    const displayJP =
-                      item.jp !== undefined && item.jp !== null
-                        ? Number(item.jp)
-                        : matchedAlloc?.allocatedJP ?? matchedAlloc?.jp ?? null;
+            <div>
+              {/* Capacity Validation Summary Card */}
+              {(() => {
+                const available = totalAvailableJP ?? 0;
+                const validation = validateTimeAllocations(allocations, available);
+                const hasAvailableJP = totalAvailableJP !== null && totalAvailableJP > 0;
+                const totalAllocated = validation.totalAllocatedJP;
+                const isOverAllocated = hasAvailableJP && totalAllocated > available;
+                const isBalanced = hasAvailableJP && totalAllocated === available && totalAllocated > 0;
+                const isUnderAllocated = hasAvailableJP && totalAllocated > 0 && totalAllocated < available;
+                const isUnallocated = totalAllocated === 0;
 
-                    return (
-                      <tr key={item.id} className="hover:bg-slate-50/80">
-                        <td className="py-2.5 px-3 text-center font-medium text-slate-500">
-                          {index + 1}
-                        </td>
-                        <td className="py-2.5 px-3 font-semibold text-indigo-700">
-                          {item.tpCode || `TP.${index + 1}`}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <div className="font-medium text-slate-800">
-                            {item.tpStatement || item.competency}
-                          </div>
-                          <div className="text-[11px] text-slate-500 mt-0.5">
-                            Lingkup Materi: {item.contentScope || item.subMaterial || '-'}
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-3 text-center font-semibold text-slate-700">
-                          {displayJP !== null ? `${displayJP} JP` : '-'}
-                        </td>
-                        <td className="py-2.5 px-3 text-center">
-                          <select
-                            value={currentWeek}
-                            onChange={(e) => handleWeekChange(item.id, Number(e.target.value))}
-                            className="text-xs px-2 py-1.5 border border-slate-300 rounded bg-white text-slate-700 font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                          >
-                            {effectiveWeeks && effectiveWeeks > 0 ? (
-                              Array.from({ length: effectiveWeeks }, (_, i) => i + 1).map((w) => (
+                let statusBadgeText = 'Belum Dialokasikan';
+                let statusBadgeClass = 'bg-slate-100 text-slate-700 border-slate-300';
+
+                if (!hasAvailableJP) {
+                  statusBadgeText =
+                    totalAllocated > 0
+                      ? `${totalAllocated} JP Dialokasikan`
+                      : 'Belum Dialokasikan';
+                  statusBadgeClass = 'bg-slate-100 text-slate-700 border-slate-300';
+                } else if (isUnallocated) {
+                  statusBadgeText = 'Belum Dialokasikan';
+                  statusBadgeClass = 'bg-slate-100 text-slate-600 border-slate-200';
+                } else if (isBalanced) {
+                  statusBadgeText = 'Seimbang';
+                  statusBadgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+                } else if (isOverAllocated) {
+                  statusBadgeText = 'Melebihi Kapasitas';
+                  statusBadgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
+                } else if (isUnderAllocated) {
+                  statusBadgeText = 'Tersedia Cadangan';
+                  statusBadgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+                }
+
+                return (
+                  <div className="mb-4 space-y-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs">
+                      <div>
+                        <span className="text-slate-500 font-medium block">JP Tersedia:</span>
+                        <span className="font-bold text-slate-800 text-sm mt-0.5 block">
+                          {hasAvailableJP ? `${available} JP` : '-'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 font-medium block">JP Dialokasikan:</span>
+                        <span
+                          className={`font-bold text-sm mt-0.5 block ${
+                            totalAllocated > 0 ? 'text-indigo-700' : 'text-slate-500'
+                          }`}
+                        >
+                          {totalAllocated > 0 ? `${totalAllocated} JP` : '0 JP'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 font-medium block">Sisa:</span>
+                        <span
+                          className={`font-bold text-sm mt-0.5 block ${
+                            !hasAvailableJP
+                              ? 'text-slate-400'
+                              : isOverAllocated
+                              ? 'text-rose-600'
+                              : isBalanced
+                              ? 'text-emerald-600'
+                              : 'text-amber-700'
+                          }`}
+                        >
+                          {hasAvailableJP
+                            ? `${validation.remainingJP > 0 ? `+${validation.remainingJP}` : validation.remainingJP} JP`
+                            : '-'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 font-medium block">Status:</span>
+                        <span
+                          className={`inline-block mt-0.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold border ${statusBadgeClass}`}
+                        >
+                          {statusBadgeText}
+                        </span>
+                      </div>
+                    </div>
+
+                    {isOverAllocated && (
+                      <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2.5 text-xs text-rose-900">
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold text-rose-950">Peringatan Kapasitas Waktu: </span>
+                          Total alokasi waktu ({totalAllocated} JP) melebihi kapasitas jam efektif tersedia ({available} JP) sebesar {Math.abs(validation.remainingJP)} JP.
+                          Silakan sesuaikan alokasi JP pada baris materi di bawah agar seimbang sebelum menyimpan.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="bg-slate-100 text-slate-800 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="py-2.5 px-3 w-10 text-center">No</th>
+                      <th className="py-2.5 px-3 w-24">Kode TP</th>
+                      <th className="py-2.5 px-3">Tujuan Pembelajaran &amp; Ruang Lingkup Materi</th>
+                      <th className="py-2.5 px-3 w-28 text-center">Alokasi JP</th>
+                      <th className="py-2.5 px-3 w-28 text-center">Pekan Mulai</th>
+                      <th className="py-2.5 px-3 w-28 text-center">Pekan Selesai</th>
+                      <th className="py-2.5 px-3 w-36 text-center">Status Alokasi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(atp.items || []).map((item, index) => {
+                      const matchedAlloc = allocations.find(
+                        (a) =>
+                          (a.sourceType === 'ATP_ITEM' && a.sourceId === item.id) ||
+                          a.atpItemId === item.id ||
+                          a.sourceId === item.id
+                      );
+                      const isAllocated = Boolean(
+                        matchedAlloc &&
+                          matchedAlloc.allocatedJP !== undefined &&
+                          matchedAlloc.allocatedJP !== null &&
+                          matchedAlloc.allocatedJP > 0
+                      );
+                      const currentJP = isAllocated
+                        ? (matchedAlloc?.allocatedJP ?? matchedAlloc?.jp ?? '')
+                        : '';
+                      const startW = matchedAlloc?.startWeek ?? matchedAlloc?.weekNumber ?? 1;
+                      const endW = matchedAlloc?.endWeek ?? startW;
+                      const maxWeeks = effectiveWeeks && effectiveWeeks > 0 ? effectiveWeeks : 18;
+
+                      return (
+                        <tr
+                          key={item.id}
+                          className={
+                            isAllocated ? 'hover:bg-slate-50/80 bg-emerald-50/20' : 'hover:bg-slate-50/80'
+                          }
+                        >
+                          <td className="py-2.5 px-3 text-center font-medium text-slate-500">
+                            {index + 1}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-indigo-700">
+                            {item.tpCode || `TP.${index + 1}`}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-medium text-slate-800">
+                              {item.tpStatement || item.competency}
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              Lingkup Materi: {item.contentScope || item.subMaterial || '-'}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <input
+                                type="number"
+                                min={1}
+                                max={100}
+                                value={currentJP}
+                                placeholder="0"
+                                onChange={(e) => {
+                                  const val = e.target.value ? Number(e.target.value) : null;
+                                  handleUpdateAtpAllocation(item.id, 'allocatedJP', val);
+                                }}
+                                className={`w-16 text-xs px-2 py-1 border rounded text-center font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none ${
+                                  isAllocated
+                                    ? 'border-indigo-400 bg-white text-indigo-900 ring-1 ring-indigo-200'
+                                    : 'border-slate-300 bg-slate-50 text-slate-500'
+                                }`}
+                              />
+                              <span className="text-[11px] text-slate-500 font-medium">JP</span>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <select
+                              disabled={!isAllocated}
+                              value={startW}
+                              onChange={(e) =>
+                                handleUpdateAtpAllocation(item.id, 'startWeek', Number(e.target.value))
+                              }
+                              className={`text-xs px-2 py-1.5 border rounded font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none ${
+                                isAllocated
+                                  ? 'border-slate-300 bg-white text-slate-800 cursor-pointer'
+                                  : 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                              }`}
+                            >
+                              {Array.from({ length: maxWeeks }, (_, i) => i + 1).map((w) => (
                                 <option key={w} value={w}>
-                                  Pekan ke-{w}
+                                  Pekan {w}
                                 </option>
-                              ))
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <select
+                              disabled={!isAllocated}
+                              value={endW}
+                              onChange={(e) =>
+                                handleUpdateAtpAllocation(item.id, 'endWeek', Number(e.target.value))
+                              }
+                              className={`text-xs px-2 py-1.5 border rounded font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none ${
+                                isAllocated
+                                  ? 'border-slate-300 bg-white text-slate-800 cursor-pointer'
+                                  : 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                              }`}
+                            >
+                              {Array.from({ length: maxWeeks }, (_, i) => i + 1)
+                                .filter((w) => w >= startW)
+                                .map((w) => (
+                                  <option key={w} value={w}>
+                                    Pekan {w}
+                                  </option>
+                                ))}
+                            </select>
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            {isAllocated ? (
+                              <div className="flex items-center justify-center gap-1.5">
+                                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded font-semibold text-[10px]">
+                                  {startW === endW ? `Pekan ${startW}` : `Pekan ${startW}-${endW}`} ({matchedAlloc.allocatedJP} JP)
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveAtpAllocation(item.id)}
+                                  title="Hapus Alokasi TP ini"
+                                  className="text-slate-400 hover:text-rose-600 p-0.5 rounded transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             ) : (
-                              <option value={currentWeek}>Pekan ke-{currentWeek}</option>
+                              <span className="px-2 py-0.5 bg-slate-100 text-slate-500 border border-slate-200 rounded text-[10px] font-medium">
+                                Belum dialokasikan
+                              </span>
                             )}
-                          </select>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )
         )}

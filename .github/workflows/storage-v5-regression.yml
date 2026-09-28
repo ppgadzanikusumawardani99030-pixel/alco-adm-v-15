@@ -91,6 +91,9 @@ jobs:
       - name: Test Calendar JP Integration Regression
         run: npx tsx scripts/testCalendarJpIntegrationRegression.ts
 
+      - name: Test Semester Time Allocation Editor
+        run: npx tsx scripts/testSemesterTimeAllocationEditor.ts
+
       - name: Test Profile School Binding V5
         run: npx tsx scripts/testProfileSchoolBindingV5.ts
 
