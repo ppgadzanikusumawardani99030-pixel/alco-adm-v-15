@@ -159,45 +159,59 @@ export function resolveLearningPlanAllocatedJP(
     return { allocatedJP: plan.allocatedJP, source: 'EXPLICIT_PLAN' };
   }
 
-  // 2. Canonical ATP allocatedJP / jp from referenced atpItemIds
-  if (plan.atpItemIds && plan.atpItemIds.length > 0 && context.atp?.items) {
-    const matchedAtps = context.atp.items.filter((item) => plan.atpItemIds.includes(item.id));
-    const totalAtpJP = matchedAtps.reduce((sum, item) => {
-      const jpVal = typeof item.allocatedJP === 'number' && item.allocatedJP > 0
-        ? item.allocatedJP
-        : (typeof item.jp === 'number' && item.jp > 0 ? item.jp : 0);
-      return sum + jpVal;
-    }, 0);
-
-    if (totalAtpJP > 0) {
-      return { allocatedJP: totalAtpJP, source: 'CANONICAL_ATP' };
-    }
-  }
-
-  // 3. Linked TimeAllocation actual value, by explicit allocation IDs or exact canonical relationships
+  // 2. Linked TimeAllocation actual value, by explicit allocation IDs or exact canonical relationships
   if (context.timeAllocations && context.timeAllocations.length > 0) {
-    const scopedAllocations = context.timeAllocations.filter((ta) => !ta.academicSettingId || ta.academicSettingId === plan.academicSettingId);
-    const relatedById = plan.timeAllocationIds && plan.timeAllocationIds.length > 0
-      ? scopedAllocations.filter((ta) => plan.timeAllocationIds?.includes(ta.id) && isTimeAllocationRelatedToPlan(ta, plan))
-      : [];
-    const relatedByAtp = (plan.atpItemIds || []).length > 0
-      ? scopedAllocations.filter((ta) => {
-          const sourceId = ta.sourceId || '';
-          const atpItemId = ta.atpItemId || '';
-          return (plan.atpItemIds || []).includes(atpItemId) || (plan.atpItemIds || []).includes(sourceId);
-        })
-      : [];
-    const relatedByTp = (plan.tpIds || []).length > 0
-      ? scopedAllocations.filter((ta) => ta.tpId && (plan.tpIds || []).includes(ta.tpId))
-      : [];
+    const scopedAllocations = context.timeAllocations.filter(
+      (ta) => !ta.academicSettingId || ta.academicSettingId === plan.academicSettingId
+    );
 
-    const matchedMap = new Map<string, TimeAllocation>();
-    [...relatedById, ...relatedByAtp, ...relatedByTp].forEach((ta) => {
-      if (ta.id) matchedMap.set(ta.id, ta);
-    });
-    const matchedAllocs = Array.from(matchedMap.values());
+    const matchedAllocs: TimeAllocation[] = [];
 
-    const totalAllocJP = matchedAllocs.reduce((sum, a) => {
+    for (const ta of scopedAllocations) {
+      if (ta.sourceType === 'ASSESSMENT' || ta.sourceType === 'RESERVE') {
+        continue;
+      }
+
+      // 1. Explicitly referenced by ID
+      const matchedById = plan.timeAllocationIds?.includes(ta.id || '');
+      if (matchedById) {
+        matchedAllocs.push(ta);
+        continue;
+      }
+
+      // 2. Referenced by ATP Item ID (strictly sourceType === 'ATP_ITEM' or absent)
+      const planAtpIds = plan.atpItemIds || [];
+      if (planAtpIds.length > 0) {
+        const atpItemId = ta.atpItemId || '';
+        const sourceId = ta.sourceId || '';
+        const matchesAtp = planAtpIds.includes(atpItemId) || planAtpIds.includes(sourceId);
+        if (matchesAtp) {
+          if (!ta.sourceType || ta.sourceType === 'ATP_ITEM') {
+            matchedAllocs.push(ta);
+            continue;
+          }
+        }
+      }
+
+      // 3. Fallback to TP ID (only if no ATP item ids are specified in the plan)
+      const planTpIds = plan.tpIds || [];
+      if (planAtpIds.length === 0 && planTpIds.length > 0) {
+        if (ta.tpId && planTpIds.includes(ta.tpId)) {
+          matchedAllocs.push(ta);
+        }
+      }
+    }
+
+    const uniqueMatchedAllocs: TimeAllocation[] = [];
+    const seenIds = new Set<string>();
+    for (const ta of matchedAllocs) {
+      if (ta.id && !seenIds.has(ta.id)) {
+        seenIds.add(ta.id);
+        uniqueMatchedAllocs.push(ta);
+      }
+    }
+
+    const totalAllocJP = uniqueMatchedAllocs.reduce((sum, a) => {
       const val = typeof a.allocatedJP === 'number' && a.allocatedJP > 0
         ? a.allocatedJP
         : (typeof a.jp === 'number' && a.jp > 0 ? a.jp : 0);
@@ -208,13 +222,13 @@ export function resolveLearningPlanAllocatedJP(
       return {
         allocatedJP: totalAllocJP,
         source: 'LINKED_TIME_ALLOCATION',
-        timeAllocationIds: matchedAllocs.map((a) => a.id),
+        timeAllocationIds: uniqueMatchedAllocs.map((a) => a.id).filter((id): id is string => typeof id === 'string'),
         issues,
       };
     }
   }
 
-  // 4. UNRESOLVED (Never guess, never fallback to synthetic numbers)
+  // 3. UNRESOLVED (Never guess, never fallback to synthetic numbers or ATPItem annual totals)
   return { allocatedJP: undefined, source: 'UNRESOLVED', issues };
 }
 

@@ -30,7 +30,7 @@ import {
   AnnualJPReference,
 } from '../../types';
 
-export type { DocumentType, DocumentMode, DocumentSnapshot, AppDocumentRecord };
+export type { DocumentType, DocumentMode, DocumentSnapshot, AppDocumentRecord, LearningPlan };
 
 export interface ProtaSemesterAllocationBundle {
   semesterPlanId: string;

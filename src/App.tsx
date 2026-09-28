@@ -51,6 +51,7 @@ import {
   saveAcademicCalendarV5,
   saveSemesterJPSettingV5,
   saveTimeAllocationV5,
+  saveLearningPlansV5,
 } from './services/storageV5';
 import { getRuntimeContextV5 } from './services/runtimeV5';
 import {
@@ -798,8 +799,57 @@ export function App() {
   const handleSaveEnrichments = (records: any[]) => {};
   const handleSaveK13Analysis = (analysis: any) => {};
   const handleSaveK13KKM = (kkm: any) => {};
-  const handleSaveLearningPlan = (plan: LearningPlan) => {};
-  const handleDeleteLearningPlan = (planId: string) => {};
+  const handleSaveLearningPlan = (plan: LearningPlan) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menyimpan modul ajar / rencana pembelajaran.',
+      });
+      return;
+    }
+
+    try {
+      const existing = runtimeContext.semesterData?.learningPlan || [];
+      const planWithTimestamp = {
+        ...plan,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const nextPlans = existing.some((p) => p.id === plan.id)
+        ? existing.map((p) => (p.id === plan.id ? planWithTimestamp : p))
+        : [...existing, planWithTimestamp];
+
+      saveLearningPlansV5(activeSemesterPlan.id, nextPlans);
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan modul ajar.',
+      });
+    }
+  };
+
+  const handleDeleteLearningPlan = (planId: string) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menghapus modul ajar.',
+      });
+      return;
+    }
+
+    try {
+      const existing = runtimeContext.semesterData?.learningPlan || [];
+      const nextPlans = existing.filter((p) => p.id !== planId);
+      saveLearningPlansV5(activeSemesterPlan.id, nextPlans);
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menghapus modul ajar.',
+      });
+    }
+  };
   const handleSaveAssessmentPlan = (plan: any) => {};
   const handleDeleteAssessmentPlan = (planId: string) => {};
   const handleSaveAssessmentPackage = (pkg: any) => {};
@@ -1065,7 +1115,7 @@ export function App() {
               assessmentResults={[]}
               remedials={[]}
               enrichments={[]}
-              learningPlans={[]}
+              learningPlans={runtimeContext.semesterData?.learningPlan || []}
               assessmentPlans={[]}
               assessmentPackages={[]}
               onSaveCalendar={handleSaveCalendar}

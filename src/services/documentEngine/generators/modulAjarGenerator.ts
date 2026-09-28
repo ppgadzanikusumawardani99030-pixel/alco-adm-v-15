@@ -17,7 +17,7 @@ import { formatOfficialDate } from '../docxStyles';
 import { LearningPlan, SchoolData, TeacherProfile } from '../../../types';
 import { validateLearningPlan, createEmptyLearningPlan } from '../../learningPlanService';
 import { getCurriculumTypeFromSetting, isMerdeka } from '../../curriculumRouter';
-import { resolveCanonicalLearningPlan } from '../index';
+import { buildModulAjarProjection } from '../modulAjarProjection';
 
 /**
  * Creates professional standard Modul Ajar identity metadata table in Times New Roman.
@@ -194,10 +194,13 @@ function createModulAjarSignoffBlock(
  */
 export async function generateModulAjar(context: DocumentGenerationContext): Promise<GeneratedDocumentResult> {
   const { school, profile, academicSetting, tp, atp } = context;
+  const isBlankMode = context.documentMode === 'blank';
 
-  // 1. Resolve canonical LearningPlan
   let plan: LearningPlan | undefined = undefined;
-  if (context.documentMode === 'blank') {
+  let resolvedTPs: any[] = [];
+  let resolvedAllocatedJP: number | undefined;
+
+  if (isBlankMode) {
     plan = createEmptyLearningPlan({
       academicSetting,
       curriculumType: getCurriculumTypeFromSetting(academicSetting),
@@ -206,36 +209,29 @@ export async function generateModulAjar(context: DocumentGenerationContext): Pro
       context: { tp, atp },
     });
   } else {
-    const resolved = resolveCanonicalLearningPlan(context);
-    if (resolved.error || !resolved.plan) {
-      throw new Error(resolved.error || 'Rancangan Pembelajaran (LearningPlan) berstatus SIAP tidak ditemukan.');
+    const projection = buildModulAjarProjection(context);
+    if (!projection.isReady || !projection.plan) {
+      throw new Error(projection.error || 'Rencana pembelajaran (Modul Ajar) belum siap.');
     }
-    plan = resolved.plan;
-  }
+    plan = projection.plan;
+    resolvedTPs = projection.resolvedTPs;
+    resolvedAllocatedJP = projection.resolvedAllocatedJP;
 
-  // 2. Validate Plan against active context
-  const validation = validateLearningPlan(plan, {
-    academicSetting,
-    tp,
-    atp,
-    k13Analysis: context.k13Analysis,
-    timeAllocations: context.timeAllocations,
-    assessmentCriteria: context.assessmentCriteria,
-  });
+    // Validate Plan against active context
+    const validation = validateLearningPlan(plan, {
+      academicSetting,
+      tp,
+      atp,
+      k13Analysis: context.k13Analysis,
+      timeAllocations: context.timeAllocations,
+      assessmentCriteria: context.assessmentCriteria,
+    });
 
-  // Strict Final Export Guard
-  if (context.documentMode !== 'blank') {
-    if (plan.status !== 'SIAP') {
-      throw new Error(
-        `Rancangan Pembelajaran (Modul Ajar) belum berstatus 'SIAP' (Status saat ini: '${plan.status}'). Silakan verifikasi dan konfirmasi SIAP terlebih dahulu.`
-      );
-    }
     if (!validation.valid) {
       throw new Error(`Rancangan Pembelajaran tidak valid untuk ekspor dokumen final: ${validation.errors.join('; ')}`);
     }
   }
 
-  const isBlankMode = context.documentMode === 'blank';
   const docChildren: (Paragraph | Table)[] = [];
 
   // Official Title - Clean, centered, bold, black, 14pt (no [DRAFT] or AI tags)
@@ -270,12 +266,11 @@ export async function generateModulAjar(context: DocumentGenerationContext): Pro
   );
 
   // Time / JP allocation resolution
-  const timeAllocationDisplay =
-    validation.resolvedAllocatedJP !== undefined
-      ? `${validation.resolvedAllocatedJP} Jam Pelajaran (JP)`
-      : typeof plan.allocatedJP === 'number'
-      ? `${plan.allocatedJP} Jam Pelajaran (JP)`
-      : 'Belum Ditetapkan';
+  const timeAllocationDisplay = isBlankMode
+    ? '................ Jam Pelajaran (JP)'
+    : resolvedAllocatedJP !== undefined
+    ? `${resolvedAllocatedJP} Jam Pelajaran (JP)`
+    : 'Belum Ditetapkan';
 
   // Identity Table
   const isK13Curriculum =
@@ -422,13 +417,9 @@ export async function generateModulAjar(context: DocumentGenerationContext): Pro
   addSubSectionTitle('A. Tujuan Pembelajaran (TP)');
   if (isBlankMode) {
     addListParagraph('........................................................................................................................');
-  } else if (validation.resolvedTPs.length > 0) {
-    validation.resolvedTPs.forEach((t, idx) => {
+  } else if (resolvedTPs.length > 0) {
+    resolvedTPs.forEach((t, idx) => {
       addListParagraph(`${idx + 1}. ${t.code ? `[${t.code}] ` : ''}${t.statement}${t.materialScope ? ` (Materi: ${t.materialScope})` : ''}`);
-    });
-  } else if (plan.objectives && plan.objectives.length > 0) {
-    plan.objectives.forEach((obj, idx) => {
-      addListParagraph(`${idx + 1}. ${obj.code ? `[${obj.code}] ` : ''}${obj.statement}${obj.materialScope ? ` (Materi: ${obj.materialScope})` : ''}`);
     });
   } else {
     addListParagraph('-');

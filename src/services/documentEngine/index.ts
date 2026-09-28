@@ -30,10 +30,12 @@ import { validateKKTPData } from '../cpWorkflowService';
 import { checkAssessmentExportEligibility, isAssessmentDocumentSnapshot } from './assessmentExportService';
 import { buildPromesProjection, buildAlokasiWaktuProjection } from './promesProjection';
 import { buildProtaProjection, buildK13ProtaProjection } from './protaProjection';
+import { buildModulAjarProjection } from './modulAjarProjection';
 
 export * from './types';
 export * from './promesProjection';
 export * from './protaProjection';
+export * from './modulAjarProjection';
 export * from './k13AlokasiWaktuHelper';
 export * from './snapshot';
 export * from './docxStyles';
@@ -451,11 +453,11 @@ export function validateDocumentRequirements(
       }
 
       case 'MODUL_AJAR': {
-        const resolved = resolveCanonicalLearningPlan(context as DocumentGenerationContext);
-        if (resolved.error) {
-          missingFields.push(resolved.error);
-        } else if (resolved.plan) {
-          const planVal = validateLearningPlan(resolved.plan, {
+        const projection = buildModulAjarProjection(context as DocumentGenerationContext);
+        if (projection.error) {
+          missingFields.push(projection.error);
+        } else if (projection.plan) {
+          const planVal = validateLearningPlan(projection.plan, {
             academicSetting: context.academicSetting,
             tp: context.tp,
             atp: context.atp,
