@@ -176,25 +176,25 @@ export function buildProtaProjection(context: DocumentGenerationContext): ProtaP
 
     if (totalMatches === 0) {
       hasIncomplete = true;
+      continue;
     } else if (totalMatches > 1) {
       hasConflict = true;
+      continue;
     }
 
-    // Push rows
-    const allMatches = [...s1Matches, ...s2Matches];
-    for (const match of allMatches) {
-      const sem = s1Matches.includes(match) ? 1 : 2;
-      rows.push({
-        id: match.id,
-        sourceType: 'ATP_ITEM',
-        atpItemId: item.id,
-        tpCode: item.tpCode || '-',
-        tpStatement: item.tpStatement || '-',
-        materialScope: item.materialScope || '-',
-        semester: sem,
-        allocatedJP: match.allocatedJP ?? match.jp ?? 0,
-      });
-    }
+    const match = s1Matches.length === 1 ? s1Matches[0] : s2Matches[0];
+    const sem = s1Matches.length === 1 ? 1 : 2;
+
+    rows.push({
+      id: match.id,
+      sourceType: 'ATP_ITEM',
+      atpItemId: item.id,
+      tpCode: item.tpCode || '-',
+      tpStatement: item.tpStatement || '-',
+      materialScope: item.materialScope || '-',
+      semester: sem,
+      allocatedJP: match.allocatedJP ?? match.jp ?? 0,
+    });
   }
 
   // Gather non-ATP allocations (ASSESSMENT & RESERVE)
@@ -335,7 +335,7 @@ export function buildK13ProtaProjection(context: DocumentGenerationContext): K13
     const allocatedJP = matchAlloc?.allocatedJP ?? matchAlloc?.jp ?? (item.alokasiJp ? Number(item.alokasiJp) : 0);
     const resolvedSemester = matchAlloc?.semester 
       ? (Number(matchAlloc.semester) as 1 | 2) 
-      : (semesterAlloc || ((item as any).semester ? Number((item as any).semester) as 1 | 2 : null));
+      : semesterAlloc;
 
     rows.push({
       id: item.id,

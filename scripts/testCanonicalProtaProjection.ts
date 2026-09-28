@@ -1,4 +1,6 @@
 import assert from 'assert';
+import fs from 'fs';
+import path from 'path';
 import {
   buildProtaProjection,
   buildK13ProtaProjection,
@@ -576,6 +578,8 @@ async function main() {
     const proj = buildProtaProjection(ctx);
     assert.strictEqual(proj.isReady, false);
     assert.strictEqual(proj.validationStatus, 'CONFLICT');
+    const conflictedRows = proj.rows.filter((r) => r.atpItemId === 'atp-item-1');
+    assert.strictEqual(conflictedRows.length, 0);
   });
 
   // --- CASE 18 — missing S1 bundle ---
@@ -648,17 +652,39 @@ async function main() {
 
   // --- CASE 21 — active semester preview metadata check ---
   await runTest('Case 21. PROTA preview metadata does not display semester', () => {
-    // Verified by source code structure that checks activePreviewType === 'PROTA' and renders previewAcademicYear only.
-    assert.ok(true);
+    const adminDocsSource = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/components/AdminDocsExport.tsx'),
+      'utf-8'
+    );
+
+    assert.ok(
+      adminDocsSource.includes(
+        "activePreviewType === 'PROTA' ? 'Tahun Ajaran:' : 'Tahun Ajaran / Sem:'"
+      )
+    );
+
+    assert.ok(
+      adminDocsSource.includes(
+        "activePreviewType === 'PROTA' ? previewAcademicYear : `${previewAcademicYear} / ${previewSemester}`"
+      )
+    );
   });
 
   // --- CASE K5 — unresolved K13 semester ---
   await runTest('Case K5. Unresolved K13 item semester resolves to null and display evaluates to -', () => {
+    const k13WithLegacySemester = {
+      ...sampleK13Analysis,
+      items: sampleK13Analysis.items.map((item) => ({
+        ...item,
+        semester: 1,
+      })),
+    };
+
     const ctx: DocumentGenerationContext = {
       school,
       profile,
       academicSetting: { ...activeSetting, curriculumType: 'K13', curriculum: 'Kurikulum 2013' },
-      k13Analysis: sampleK13Analysis,
+      k13Analysis: k13WithLegacySemester,
       protaSemesterAllocations: [], // No allocations at all
       documentMode: 'data',
       documentDate: '2026-07-15',
