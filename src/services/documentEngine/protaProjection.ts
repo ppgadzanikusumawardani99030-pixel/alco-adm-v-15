@@ -41,7 +41,7 @@ export interface K13ProtaProjectionRow {
   materi: string;
   kegiatan: string;
   allocatedJP: number;
-  semester: 1 | 2;
+  semester: 1 | 2 | null;
 }
 
 export interface K13ProtaProjection {
@@ -101,6 +101,52 @@ export function buildProtaProjection(context: DocumentGenerationContext): ProtaP
     };
   }
 
+  // 1. Bundle validations
+  const s1Bundles = bundles.filter((b) => b.semester === 1);
+  const s2Bundles = bundles.filter((b) => b.semester === 2);
+
+  const hasBundleConflict = s1Bundles.length > 1 || s2Bundles.length > 1;
+  const hasS1Bundle = s1Bundles.length > 0;
+  const hasS2Bundle = s2Bundles.length > 0;
+
+  if (hasBundleConflict) {
+    return {
+      isReady: false,
+      unreadyReason: 'Terdapat konflik alokasi: Duplikasi data distribusi Semester 1 atau Semester 2.',
+      academicYear,
+      rows: [],
+      assessmentRows: [],
+      reserveRows: [],
+      semester1AllocatedJP: 0,
+      semester2AllocatedJP: 0,
+      totalAllocatedJP: 0,
+      officialAnnualJP,
+      referenceWeeklyEquivalentJP,
+      regulationReference,
+      remainingAnnualJP: null,
+      validationStatus: 'CONFLICT',
+    };
+  }
+
+  if (!hasS1Bundle || !hasS2Bundle) {
+    return {
+      isReady: false,
+      unreadyReason: 'Program Tahunan belum dapat dibuat karena data distribusi Semester 1 dan Semester 2 belum lengkap.',
+      academicYear,
+      rows: [],
+      assessmentRows: [],
+      reserveRows: [],
+      semester1AllocatedJP: 0,
+      semester2AllocatedJP: 0,
+      totalAllocatedJP: 0,
+      officialAnnualJP,
+      referenceWeeklyEquivalentJP,
+      regulationReference,
+      remainingAnnualJP: null,
+      validationStatus: 'INCOMPLETE',
+    };
+  }
+
   const rows: ProtaProjectionRow[] = [];
   const assessmentRows: ProtaProjectionRow[] = [];
   const reserveRows: ProtaProjectionRow[] = [];
@@ -126,13 +172,12 @@ export function buildProtaProjection(context: DocumentGenerationContext): ProtaP
       }
     }
 
-    const inS1 = s1Matches.length > 0;
-    const inS2 = s2Matches.length > 0;
+    const totalMatches = s1Matches.length + s2Matches.length;
 
-    if (inS1 && inS2) {
-      hasConflict = true;
-    } else if (!inS1 && !inS2) {
+    if (totalMatches === 0) {
       hasIncomplete = true;
+    } else if (totalMatches > 1) {
+      hasConflict = true;
     }
 
     // Push rows
@@ -263,7 +308,7 @@ export function buildK13ProtaProjection(context: DocumentGenerationContext): K13
   for (const item of k13Items) {
     // Find matching time allocation across bundles
     let matchAlloc: TimeAllocation | undefined;
-    let semesterAlloc: 1 | 2 = 1;
+    let semesterAlloc: 1 | 2 | null = null;
 
     for (const bundle of bundles) {
       const found = bundle.allocations.find(
@@ -283,12 +328,14 @@ export function buildK13ProtaProjection(context: DocumentGenerationContext): K13
       );
       if (found) {
         matchAlloc = found;
-        semesterAlloc = (found.semester as 1 | 2) || 1;
+        semesterAlloc = (found.semester as 1 | 2) || null;
       }
     }
 
     const allocatedJP = matchAlloc?.allocatedJP ?? matchAlloc?.jp ?? (item.alokasiJp ? Number(item.alokasiJp) : 0);
-    const resolvedSemester = matchAlloc?.semester ? (Number(matchAlloc.semester) as 1 | 2) : semesterAlloc;
+    const resolvedSemester = matchAlloc?.semester 
+      ? (Number(matchAlloc.semester) as 1 | 2) 
+      : (semesterAlloc || ((item as any).semester ? Number((item as any).semester) as 1 | 2 : null));
 
     rows.push({
       id: item.id,

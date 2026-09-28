@@ -332,7 +332,7 @@ export async function generatePdfDocument(
             r.kd,
             `${r.materi}\nKegiatan: ${r.kegiatan}`,
             `${r.allocatedJP} JP`,
-            `Semester ${r.semester}`,
+            r.semester ? `Semester ${r.semester}` : '-',
           ]);
 
           rows.push([

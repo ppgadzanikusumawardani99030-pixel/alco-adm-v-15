@@ -1166,9 +1166,11 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
                       </span>
                     </div>
                     <div>
-                      <span className="font-semibold text-slate-600">Tahun Ajaran / Sem:</span>{' '}
+                      <span className="font-semibold text-slate-600">
+                        {activePreviewType === 'PROTA' ? 'Tahun Ajaran:' : 'Tahun Ajaran / Sem:'}
+                      </span>{' '}
                       <span className="font-bold">
-                        {previewAcademicYear} / {previewSemester}
+                        {activePreviewType === 'PROTA' ? previewAcademicYear : `${previewAcademicYear} / ${previewSemester}`}
                       </span>
                     </div>
                     <div>

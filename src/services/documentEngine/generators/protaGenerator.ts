@@ -163,7 +163,7 @@ export async function generatePROTA(context: DocumentGenerationContext): Promise
               createTableDataCell(r.kd, 14, AlignmentType.CENTER, true),
               createTableDataCell(`${r.materi}\nKegiatan: ${r.kegiatan}`, 55, AlignmentType.LEFT),
               createTableDataCell(`${r.allocatedJP} JP`, 12, AlignmentType.CENTER, true),
-              createTableDataCell(`Semester ${r.semester}`, 13, AlignmentType.CENTER),
+              createTableDataCell(r.semester ? `Semester ${r.semester}` : '-', 13, AlignmentType.CENTER),
             ],
           })
         );
