@@ -72,6 +72,7 @@ import { exportAssessmentDocx, exportAssessmentPdf, createAssessmentPreviewModel
 import { AssessmentDocumentPreview } from './AssessmentDocumentPreview';
 import { DocumentGenerationContext } from '../../services/documentEngine/types';
 import { RefreshCw, AlertOctagon, Info, Printer, Eye } from 'lucide-react';
+import { aiFetch } from '../../services/aiService';
 
 interface AssessmentPackageBuilderProps {
   school: SchoolData;
@@ -357,7 +358,7 @@ export const AssessmentPackageBuilder: React.FC<AssessmentPackageBuilderProps> =
       // 3. Inject standard provider calling the backend proxy endpoint
       const provider = {
         generate: async (request: any) => {
-          const res = await fetch('/api/ai/generate-assessment-package', {
+          const res = await aiFetch('/api/ai/generate-assessment-package', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -471,7 +472,7 @@ export const AssessmentPackageBuilder: React.FC<AssessmentPackageBuilderProps> =
 
       const provider = {
         regenerate: async (contract: any) => {
-          const res = await fetch('/api/ai/regenerate-assessment-target', {
+          const res = await aiFetch('/api/ai/regenerate-assessment-target', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contract }),

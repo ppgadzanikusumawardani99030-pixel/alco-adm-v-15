@@ -27,38 +27,45 @@ const PORT = (!isNaN(envPort) && envPort > 0) ? envPort : 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
-// Lazy initializer for Gemini client to prevent crashes if key is missing on load
-let aiClient: GoogleGenAI | null = null;
-function getAIClient(): GoogleGenAI {
-  if (!aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY environment variable is not configured');
-    }
-    aiClient = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
+// Resolver for Gemini API Key: Request X-Gemini-API-Key -> fallback process.env.GEMINI_API_KEY -> null
+function resolveApiKey(req: express.Request): string | null {
+  const headerVal = req.headers['x-gemini-api-key'];
+  const userKey = Array.isArray(headerVal) ? headerVal[0] : headerVal;
+  if (typeof userKey === 'string' && userKey.trim().length > 0) {
+    return userKey.trim();
   }
-  return aiClient;
+  if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 0) {
+    return process.env.GEMINI_API_KEY.trim();
+  }
+  return null;
+}
+
+// Dedicated per-request/key Gemini client (no global singleton cache across users)
+function createAIClient(apiKey: string): GoogleGenAI {
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
 }
 
 // Resilient generator helper with model fallbacks and exponential backoff retry for 503/429/temporary spikes
-async function generateContentWithRetry(params: {
-  contents: string;
-  config?: any;
-}): Promise<{ text?: string }> {
+async function generateContentWithRetry(
+  ai: GoogleGenAI,
+  params: {
+    contents: string;
+    config?: any;
+  }
+): Promise<{ text?: string }> {
   // Standard non-paid models ordered by capability and availability
   const modelsToTry = [
     'gemini-3.8-flash',
     'gemini-3.1-flash-lite',
     'gemini-flash-latest',
   ];
-  const ai = getAIClient();
   let lastError: any = null;
 
   for (const model of modelsToTry) {
@@ -488,9 +495,11 @@ app.post('/api/ai/analyze-cp', async (req, res) => {
     return res.status(400).json({ error: 'Data CP tidak boleh kosong' });
   }
 
-  // If GEMINI_API_KEY is configured, try Gemini AI first
-  if (process.env.GEMINI_API_KEY) {
+  // If GEMINI API key is configured or provided via BYOK header, try Gemini AI first
+  const apiKey = resolveApiKey(req);
+  if (apiKey) {
     try {
+      const ai = createAIClient(apiKey);
       const prompt = `Anda adalah pakar kurikulum dan konsultan pendidikan profesional di Indonesia.
 Bantu seorang guru memahami, membedah, dan menganalisis Capaian Pembelajaran (CP) berikut:
 
@@ -511,7 +520,7 @@ Berikan output dalam format JSON dengan struktur:
 4. "p3Focus": Array string Dimensi Profil Lulusan yang paling relevan.
 5. "pedagogicalTips": Array string berisi 2-3 tips strategi pembelajaran kontekstual di kelas.`;
 
-      const response = await generateContentWithRetry({
+      const response = await generateContentWithRetry(ai, {
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -572,7 +581,8 @@ app.post('/api/ai/generate-tp', async (req, res) => {
     return res.status(400).json({ error: 'Capaian Pembelajaran (CP) harus diisi terlebih dahulu' });
   }
 
-  if (!process.env.GEMINI_API_KEY) {
+  const apiKey = resolveApiKey(req);
+  if (!apiKey) {
     return res.status(503).json({
       success: false,
       code: 'AI_NOT_CONFIGURED',
@@ -581,6 +591,7 @@ app.post('/api/ai/generate-tp', async (req, res) => {
   }
 
   try {
+    const ai = createAIClient(apiKey);
     const prompt = `Anda adalah ahli perancangan kurikulum pendidikan nasional Indonesia.
 Tugas Anda adalah merumuskan Tujuan Pembelajaran (TP) yang diturunkan SECARA KETAT dan EKSPLISIT dari Capaian Pembelajaran (CP) dan Hasil Analisis CP yang diberikan di bawah ini.
 
@@ -611,7 +622,7 @@ ${cpAnalysisItems.map((a: any, idx: number) => `${idx + 1}. [Elemen: ${a.element
 Buatlah sekitar ${count} hingga 6 butir Tujuan Pembelajaran (TP) yang sistematis.
 Kembalikan respon dalam format JSON sesuai schema:`;
 
-    const response = await generateContentWithRetry({
+    const response = await generateContentWithRetry(ai, {
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -648,7 +659,12 @@ Kembalikan respon dalam format JSON sesuai schema:`;
     return res.json({ success: true, items: parsed, engine: 'gemini' });
   } catch (error: any) {
     console.error('Gemini generate TP failed:', error);
-    return res.status(500).json({ error: `Gagal merumuskan AI TP: ${error.message || 'Respons provider AI tidak dapat diproses'}` });
+    const isAuth = error?.status === 401 || error?.status === 403 ||
+      (error?.message && (error.message.includes('API_KEY_INVALID') || error.message.includes('API key not valid')));
+    return res.status(isAuth ? (error.status || 401) : 500).json({
+      error: `Gagal merumuskan AI TP: ${error.message || 'Respons provider AI tidak dapat diproses'}`,
+      code: isAuth ? 'INVALID_API_KEY' : undefined,
+    });
   }
 });
 
@@ -711,8 +727,9 @@ app.post('/api/ai/generate-atp', async (req, res) => {
     validatedWeeklyJP = parsed;
   }
 
-  // 4. Check AI configuration (GEMINI_API_KEY)
-  if (!process.env.GEMINI_API_KEY) {
+  // 4. Check AI configuration (GEMINI_API_KEY or BYOK header)
+  const apiKey = resolveApiKey(req);
+  if (!apiKey) {
     return res.status(503).json({
       success: false,
       code: 'AI_NOT_CONFIGURED',
@@ -721,6 +738,7 @@ app.post('/api/ai/generate-atp', async (req, res) => {
   }
 
   try {
+    const ai = createAIClient(apiKey);
     const prompt = `Anda adalah spesialis penyusun Alur Tujuan Pembelajaran (ATP) dan perangkat pembelajaran Kurikulum Merdeka.
 Susunlah Matriks Alur Tujuan Pembelajaran (ATP) yang berurutan secara logis, pedagogis, dan terstruktur dari daftar Tujuan Pembelajaran (TP) berikut:
 
@@ -755,7 +773,7 @@ ${
 
 Kembalikan output JSON sesuai schema:`;
 
-    const response = await generateContentWithRetry({
+    const response = await generateContentWithRetry(ai, {
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -841,7 +859,12 @@ Kembalikan output JSON sesuai schema:`;
     return res.json({ success: true, data: parsed, engine: 'gemini' });
   } catch (error: any) {
     console.error('Gemini ATP generation failed:', error);
-    return res.status(500).json({ error: `Gagal menyusun ATP dengan AI: ${error.message || 'Respons provider AI tidak dapat diproses'}` });
+    const isAuth = error?.status === 401 || error?.status === 403 ||
+      (error?.message && (error.message.includes('API_KEY_INVALID') || error.message.includes('API key not valid')));
+    return res.status(isAuth ? (error.status || 401) : 500).json({
+      error: `Gagal menyusun ATP dengan AI: ${error.message || 'Respons provider AI tidak dapat diproses'}`,
+      code: isAuth ? 'INVALID_API_KEY' : undefined,
+    });
   }
 });
 
@@ -852,9 +875,11 @@ app.post('/api/ai/refine-text', async (req, res) => {
     return res.status(400).json({ error: 'Teks tidak boleh kosong' });
   }
 
-  // If GEMINI_API_KEY is configured, try Gemini AI first
-  if (process.env.GEMINI_API_KEY) {
+  // If GEMINI_API_KEY is configured or user key provided, try Gemini AI first
+  const apiKey = resolveApiKey(req);
+  if (apiKey) {
     try {
+      const ai = createAIClient(apiKey);
       const prompt = `Anda adalah asisten ahli administrasi guru Indonesia.
 Teks asli: "${text}"
 Konteks: ${context || 'Administrasi Kurikulum Merdeka'}
@@ -862,7 +887,7 @@ Instruksi perbaikan: ${instruction || 'Sempurnakan tata bahasa, ketepatan pedago
 
 Berikan versi teks hasil penyempurnaan dalam bahasa Indonesia yang baku dan elegan. Langsung berikan teks hasil tanpa pembuka/penutup.`;
 
-      const response = await generateContentWithRetry({
+      const response = await generateContentWithRetry(ai, {
         contents: prompt,
       });
 
@@ -997,7 +1022,8 @@ app.post('/api/ai/generate-learning-plan', async (req, res) => {
     return res.status(400).json({ error: 'Minimal satu Tujuan Pembelajaran (TP) diperlukan untuk menyusun Modul Ajar' });
   }
 
-  if (!process.env.GEMINI_API_KEY) {
+  const apiKey = resolveApiKey(req);
+  if (!apiKey) {
     return res.status(503).json({
       success: false,
       code: 'AI_NOT_CONFIGURED',
@@ -1006,6 +1032,7 @@ app.post('/api/ai/generate-learning-plan', async (req, res) => {
   }
 
   try {
+    const ai = createAIClient(apiKey);
     const subject = academicSetting?.subject || '';
     const grade = academicSetting?.grade || '';
     const phase = academicSetting?.phase || '';
@@ -1050,7 +1077,7 @@ INSTRUKSI KEGIATAN & ASESMEN:
 
 Kembalikan output JSON sesuai schema.`;
 
-    const response = await generateContentWithRetry({
+    const response = await generateContentWithRetry(ai, {
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -1225,27 +1252,36 @@ app.post('/api/ai/generate-assessment-package', async (req, res) => {
     return res.status(400).json({ error: 'User prompt is required' });
   }
 
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      const response = await generateContentWithRetry({
-        contents: userPrompt,
-        config: {
-          systemInstruction: systemPrompt,
-          responseMimeType: 'application/json',
-          responseSchema: assessmentAIResponseSchema,
-        },
-      });
-
-      if (response.text) {
-        return res.json({ success: true, rawText: response.text });
-      }
-    } catch (error: any) {
-      console.error('Gemini generate assessment package failed:', error);
-      return res.status(500).json({ error: error.message || 'Gagal generate perangkat asesmen via Gemini' });
-    }
+  const apiKey = resolveApiKey(req);
+  if (!apiKey) {
+    return res.status(503).json({
+      success: false,
+      code: 'AI_NOT_CONFIGURED',
+      error: 'Layanan AI belum dikonfigurasi pada server.',
+    });
   }
 
-  return res.status(501).json({ error: 'Kunci API Gemini belum dikonfigurasi di lingkungan server.' });
+  try {
+    const ai = createAIClient(apiKey);
+    const response = await generateContentWithRetry(ai, {
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: 'application/json',
+        responseSchema: assessmentAIResponseSchema,
+      },
+    });
+
+    if (response.text) {
+      return res.json({ success: true, rawText: response.text });
+    }
+  } catch (error: any) {
+    console.error('Gemini generate assessment package failed:', error);
+    const isAuth = error?.status === 401 || error?.status === 403;
+    return res.status(isAuth ? error.status : 500).json({ error: error.message || 'Gagal generate perangkat asesmen via Gemini' });
+  }
+
+  return res.status(500).json({ error: 'Gagal menghasilkan perangkat asesmen' });
 });
 
 // 3. Endpoint: AI Assessment Target Granular Regeneration (9C.6 / 9C.7)
@@ -1255,9 +1291,18 @@ app.post('/api/ai/regenerate-assessment-target', async (req, res) => {
     return res.status(400).json({ error: 'Contract is required' });
   }
 
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      const systemInstruction = `Anda adalah asisten AI kurikulum dan pembuat soal profesional di Indonesia.
+  const apiKey = resolveApiKey(req);
+  if (!apiKey) {
+    return res.status(503).json({
+      success: false,
+      code: 'AI_NOT_CONFIGURED',
+      error: 'Layanan AI belum dikonfigurasi pada server.',
+    });
+  }
+
+  try {
+    const ai = createAIClient(apiKey);
+    const systemInstruction = `Anda adalah asisten AI kurikulum dan pembuat soal profesional di Indonesia.
 Bantu guru melakukan regenerasi granular (pembaruan bertahap) secara aman untuk target: ${contract.target}.
 Target ID: ${contract.targetId}.
 
@@ -1266,7 +1311,7 @@ Aturan utama:
 - Kembalikan bidang yang berubah atau yang baru saja, pertahankan tipe data bidang aslinya.
 - Jangan menambahkan penjelasan, markdown block (seperti \`\`\`json), atau teks pengantar lainnya. Tanggapi dengan format mentah JSON objek saja.`;
 
-      const userPrompt = `Lakukan regenerasi target ${contract.target} untuk Target ID: ${contract.targetId}.
+    const userPrompt = `Lakukan regenerasi target ${contract.target} untuk Target ID: ${contract.targetId}.
 
 Konteks tidak berubah (Immutable Context):
 ${JSON.stringify(contract.immutableContext, null, 2)}
@@ -1286,30 +1331,30 @@ ${JSON.stringify(contract.editableContent, null, 2)}
 
 Hasilkan pembaruan untuk editableContent tersebut dalam format JSON.`;
 
-      const response = await generateContentWithRetry({
-        contents: userPrompt,
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-        },
-      });
+    const response = await generateContentWithRetry(ai, {
+      contents: userPrompt,
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+      },
+    });
 
-      if (response.text) {
-        const cleanedText = response.text.trim();
-        const parsed = cleanAndParseJSON(cleanedText, null);
-        if (parsed) {
-          return res.json({ success: true, data: parsed });
-        } else {
-          return res.status(500).json({ error: 'Gagal parse JSON hasil regenerasi AI' });
-        }
+    if (response.text) {
+      const cleanedText = response.text.trim();
+      const parsed = cleanAndParseJSON(cleanedText, null);
+      if (parsed) {
+        return res.json({ success: true, data: parsed });
+      } else {
+        return res.status(500).json({ error: 'Gagal parse JSON hasil regenerasi AI' });
       }
-    } catch (error: any) {
-      console.error('Gemini regenerate assessment target failed:', error);
-      return res.status(500).json({ error: error.message || 'Gagal regenerasi granular via Gemini' });
     }
+  } catch (error: any) {
+    console.error('Gemini regenerate assessment target failed:', error);
+    const isAuth = error?.status === 401 || error?.status === 403;
+    return res.status(isAuth ? error.status : 500).json({ error: error.message || 'Gagal regenerasi granular via Gemini' });
   }
 
-  return res.status(501).json({ error: 'Kunci API Gemini belum dikonfigurasi di lingkungan server.' });
+  return res.status(500).json({ error: 'Gagal meregenerasi target asesmen' });
 });
 
 // Final /api 404 handler - must return JSON and never fall through to Vite static HTML fallback
