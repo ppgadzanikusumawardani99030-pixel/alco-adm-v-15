@@ -132,7 +132,7 @@ async function runTests() {
       assert(contentType.includes('application/json'), `Content-Type contains application/json (received: ${contentType})`);
       
       const data = await res.json() as any;
-      assert(data.error !== undefined && data.error.includes('GEMINI_API_KEY tidak terpasang'), 'Returns expected JSON error because Gemini key is absent');
+      assert(data.code === 'AI_NOT_CONFIGURED', 'Returns expected JSON code AI_NOT_CONFIGURED because Gemini key is absent');
       
       // Explicitly check it is not HTML
       const responseText = JSON.stringify(data);
