@@ -355,58 +355,169 @@ runTest('10. Insufficient effective weeks fails closed without generating invali
 });
 
 // -----------------------------------------------------------------------------
-// TEST 11 & 12: Manual Overwrite Protection & Preservation of Non-ATP Allocations
+// TEST 11: Non-ATP Reserved Capacity (Case 1: ASSESSMENT, Case 2: ASSESSMENT + RESERVE)
 // -----------------------------------------------------------------------------
-runTest('11 & 12. Non-ATP allocations (e.g. ASSESSMENT, RESERVE) are preserved and not clobbered', () => {
-  const existingAllocs: TimeAllocation[] = [
-    {
-      id: 'assessment-alloc-1',
-      academicSettingId: sem1.id,
-      sourceType: 'ASSESSMENT',
-      sourceId: 'pts-1',
-      allocatedJP: 4,
-      jp: 4,
-      startWeek: 9,
-      endWeek: 9,
-    },
-    {
-      id: 'old-atp-alloc-1',
-      academicSettingId: sem1.id,
-      sourceType: 'ATP_ITEM',
-      sourceId: 'atp-item-1',
-      atpItemId: 'atp-item-1',
-      allocatedJP: 8,
-      jp: 8,
-      startWeek: 1,
-      endWeek: 2,
-    },
-  ];
+runTest('11. Reserved non-ATP capacity deducts from ATP capacity, yielding exact combined BALANCED allocation', () => {
+  const totalAvailableJP = 72;
 
-  const autoRes = buildAutomaticSemesterAllocations({
+  // Case 1: ASSESSMENT = 4 JP -> ATP Auto = 68 JP -> Combined = 72 JP -> BALANCED
+  const assessmentAlloc: TimeAllocation = {
+    id: 'assessment-1',
+    academicSettingId: sem1.id,
+    sourceType: 'ASSESSMENT',
+    sourceId: 'pts-1',
+    allocatedJP: 4,
+    jp: 4,
+    startWeek: 9,
+    endWeek: 9,
+  };
+  const preserved1 = [assessmentAlloc];
+  const reservedJP1 = preserved1.reduce((sum, a) => sum + (a.allocatedJP ?? a.jp), 0);
+  assert.strictEqual(reservedJP1, 4);
+
+  const autoRes1 = buildAutomaticSemesterAllocations({
     annualATPItems: sampleAnnualATP.items,
     targetSemester: '1',
     semesterPlanId: sem1.id,
+    reservedNonAtpJP: reservedJP1,
     s1Capacity: {
-      availableJP: 72,
+      availableJP: totalAvailableJP,
       effectiveWeeks: 18,
       actualScheduledWeeklyJP: 4,
       isCalendarConfirmed: true,
     },
     s2Capacity: {
-      availableJP: 72,
+      availableJP: totalAvailableJP,
       effectiveWeeks: 18,
       actualScheduledWeeklyJP: 4,
       isCalendarConfirmed: true,
     },
   });
 
-  // Filtering simulation matching TimePlanningManager
-  const nonAtp = existingAllocs.filter((a) => a.sourceType !== 'ATP_ITEM' && !a.atpItemId);
-  const combined = [...nonAtp, ...autoRes.allocations];
+  assert.strictEqual(autoRes1.status, 'SUCCESS');
+  const sumAtpJP1 = autoRes1.allocations.reduce((sum, a) => sum + a.allocatedJP, 0);
+  assert.strictEqual(sumAtpJP1, 68, 'ATP auto allocations must sum to 68 JP (72 - 4)');
 
-  assert.strictEqual(combined.length, 1 + autoRes.allocations.length);
-  assert.ok(combined.some((a) => a.id === 'assessment-alloc-1'), 'ASSESSMENT allocation must be preserved');
-  assert.ok(!combined.some((a) => a.id === 'old-atp-alloc-1'), 'Old ATP allocation replaced by new draft');
+  const combinedAllocs1 = [...preserved1, ...autoRes1.allocations];
+  const validation1 = validateTimeAllocations(combinedAllocs1, totalAvailableJP);
+  assert.strictEqual(validation1.status, 'BALANCED');
+  assert.strictEqual(validation1.totalAllocatedJP, 72);
+  assert.strictEqual(validation1.remainingJP, 0);
+
+  // Case 2: ASSESSMENT = 4 JP, RESERVE = 8 JP -> Reserved = 12 JP -> ATP Auto = 60 JP -> Combined = 72 JP -> BALANCED
+  const reserveAlloc: TimeAllocation = {
+    id: 'reserve-1',
+    academicSettingId: sem1.id,
+    sourceType: 'RESERVE',
+    sourceId: 'cadangan-1',
+    allocatedJP: 8,
+    jp: 8,
+    startWeek: 18,
+    endWeek: 18,
+  };
+  const preserved2 = [assessmentAlloc, reserveAlloc];
+  const reservedJP2 = preserved2.reduce((sum, a) => sum + (a.allocatedJP ?? a.jp), 0);
+  assert.strictEqual(reservedJP2, 12);
+
+  const autoRes2 = buildAutomaticSemesterAllocations({
+    annualATPItems: sampleAnnualATP.items,
+    targetSemester: '1',
+    semesterPlanId: sem1.id,
+    reservedNonAtpJP: reservedJP2,
+    s1Capacity: {
+      availableJP: totalAvailableJP,
+      effectiveWeeks: 18,
+      actualScheduledWeeklyJP: 4,
+      isCalendarConfirmed: true,
+    },
+    s2Capacity: {
+      availableJP: totalAvailableJP,
+      effectiveWeeks: 18,
+      actualScheduledWeeklyJP: 4,
+      isCalendarConfirmed: true,
+    },
+  });
+
+  assert.strictEqual(autoRes2.status, 'SUCCESS');
+  const sumAtpJP2 = autoRes2.allocations.reduce((sum, a) => sum + a.allocatedJP, 0);
+  assert.strictEqual(sumAtpJP2, 60, 'ATP auto allocations must sum to 60 JP (72 - 12)');
+
+  const combinedAllocs2 = [...preserved2, ...autoRes2.allocations];
+  const validation2 = validateTimeAllocations(combinedAllocs2, totalAvailableJP);
+  assert.strictEqual(validation2.status, 'BALANCED');
+  assert.strictEqual(validation2.totalAllocatedJP, 72);
+  assert.strictEqual(validation2.remainingJP, 0);
+});
+
+// -----------------------------------------------------------------------------
+// TEST 12: Case 3 (Fail closed if reserved non-ATP >= availableJP) & Case 4 & 5 (ATP Identity Detection)
+// -----------------------------------------------------------------------------
+runTest('12. Reserved non-ATP >= availableJP fails closed; Overwrite confirmation triggers strictly on ATP identity', () => {
+  const totalAvailableJP = 72;
+
+  // Case 3A: Reserved = 72 JP (equal to available) -> INSUFFICIENT_ATP_CAPACITY
+  const failResEqual = buildAutomaticSemesterAllocations({
+    annualATPItems: sampleAnnualATP.items,
+    targetSemester: '1',
+    semesterPlanId: sem1.id,
+    reservedNonAtpJP: 72,
+    s1Capacity: {
+      availableJP: totalAvailableJP,
+      effectiveWeeks: 18,
+      actualScheduledWeeklyJP: 4,
+      isCalendarConfirmed: true,
+    },
+    s2Capacity: {
+      availableJP: totalAvailableJP,
+      effectiveWeeks: 18,
+      actualScheduledWeeklyJP: 4,
+      isCalendarConfirmed: true,
+    },
+  });
+  assert.strictEqual(failResEqual.status, 'INSUFFICIENT_ATP_CAPACITY');
+  assert.strictEqual(failResEqual.allocations.length, 0);
+
+  // Case 3B: Reserved = 80 JP (greater than available) -> INSUFFICIENT_ATP_CAPACITY
+  const failResGreater = buildAutomaticSemesterAllocations({
+    annualATPItems: sampleAnnualATP.items,
+    targetSemester: '1',
+    semesterPlanId: sem1.id,
+    reservedNonAtpJP: 80,
+    s1Capacity: {
+      availableJP: totalAvailableJP,
+      effectiveWeeks: 18,
+      actualScheduledWeeklyJP: 4,
+      isCalendarConfirmed: true,
+    },
+    s2Capacity: {
+      availableJP: totalAvailableJP,
+      effectiveWeeks: 18,
+      actualScheduledWeeklyJP: 4,
+      isCalendarConfirmed: true,
+    },
+  });
+  assert.strictEqual(failResGreater.status, 'INSUFFICIENT_ATP_CAPACITY');
+  assert.strictEqual(failResGreater.allocations.length, 0);
+
+  // Case 4: ASSESSMENT / RESERVE alone does NOT trigger existing ATP warning
+  const nonAtpOnly: TimeAllocation[] = [
+    { id: '1', academicSettingId: sem1.id, sourceType: 'ASSESSMENT', allocatedJP: 4, jp: 4 },
+    { id: '2', academicSettingId: sem1.id, sourceType: 'RESERVE', allocatedJP: 8, jp: 8 },
+  ];
+  const hasExistingAtpFalse = nonAtpOnly.some(
+    (a) => a.sourceType === 'ATP_ITEM' || Boolean(a.atpItemId)
+  );
+  assert.strictEqual(hasExistingAtpFalse, false, 'Non-ATP allocations must not be recognized as ATP');
+
+  // Case 5: Existing ATP allocation triggers confirmation
+  const withAtp: TimeAllocation[] = [
+    { id: '1', academicSettingId: sem1.id, sourceType: 'ASSESSMENT', allocatedJP: 4, jp: 4 },
+    { id: 'atp-alloc-1', academicSettingId: sem1.id, sourceType: 'ATP_ITEM', sourceId: 'atp-item-1', atpItemId: 'atp-item-1', allocatedJP: 12, jp: 12 },
+  ];
+  const hasExistingAtpTrue = withAtp.some(
+    (a) => a.sourceType === 'ATP_ITEM' || Boolean(a.atpItemId)
+  );
+  assert.strictEqual(hasExistingAtpTrue, true, 'ATP allocation must be recognized as existing ATP');
 });
 
 // -----------------------------------------------------------------------------

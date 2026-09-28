@@ -1064,12 +1064,18 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
       return;
     }
 
-    // Check if existing allocations already have ATP_ITEM allocations
+    // Preserve non-ATP allocations (e.g. ASSESSMENT, RESERVE, etc.)
+    const preservedNonAtpAllocations = allocations.filter(
+      (a) => a.sourceType !== 'ATP_ITEM' && !a.atpItemId && a.sourceType !== 'KD'
+    );
+    const reservedNonAtpJP = preservedNonAtpAllocations.reduce(
+      (sum, item) => sum + (Number(item.allocatedJP ?? item.jp) || 0),
+      0
+    );
+
+    // Check if existing allocations already have ATP_ITEM allocations strictly by ATP identity
     const hasExistingAtp = allocations.some(
-      (a) =>
-        a.sourceType === 'ATP_ITEM' ||
-        Boolean(a.atpItemId) ||
-        (a.allocatedJP !== undefined && a.allocatedJP !== null && a.allocatedJP > 0)
+      (a) => a.sourceType === 'ATP_ITEM' || Boolean(a.atpItemId)
     );
 
     if (hasExistingAtp) {
@@ -1095,20 +1101,32 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
       annualATPItems: atp?.items || [],
       targetSemester: targetSem,
       semesterPlanId: planId,
+      reservedNonAtpJP,
       s1Capacity: autoAllocationReadiness.s1Capacity,
       s2Capacity: autoAllocationReadiness.s2Capacity,
     });
 
     if (autoResult.status === 'SUCCESS') {
-      // Preserve non-ATP allocations (e.g. ASSESSMENT, RESERVE, etc.)
-      const nonAtpAllocations = allocations.filter(
-        (a) =>
-          a.sourceType !== 'ATP_ITEM' &&
-          !a.atpItemId &&
-          a.sourceType !== undefined &&
-          a.sourceType !== 'KD'
-      );
-      const updatedAllocations = [...nonAtpAllocations, ...autoResult.allocations];
+      const updatedAllocations = [
+        ...preservedNonAtpAllocations,
+        ...autoResult.allocations,
+      ];
+
+      const targetCap =
+        targetSem === '1'
+          ? autoAllocationReadiness.s1Capacity
+          : autoAllocationReadiness.s2Capacity;
+      const totalAvailable = totalAvailableJP ?? targetCap.availableJP ?? 0;
+      const combinedValidation = validateTimeAllocations(updatedAllocations, totalAvailable);
+
+      if (combinedValidation.status === 'OVER_ALLOCATED') {
+        setSaveNotification(
+          `Gagal menyusun alokasi otomatis: Total alokasi (${combinedValidation.totalAllocatedJP} JP) melebihi kapasitas tersedia (${totalAvailable} JP).`
+        );
+        setTimeout(() => setSaveNotification(null), 4000);
+        return;
+      }
+
       setAllocations(updatedAllocations);
       setSaveNotification(
         'Alokasi waktu semester berhasil disusun otomatis! Silakan tinjau dan klik "Simpan Pemetaan Waktu".'

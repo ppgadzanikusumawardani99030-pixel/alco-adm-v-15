@@ -1189,6 +1189,7 @@ export interface AutoAllocationParams {
   annualATPItems: Array<{ id: string; stepNumber?: number; [key: string]: any }>;
   targetSemester: '1' | '2';
   semesterPlanId: string;
+  reservedNonAtpJP?: number;
   s1Capacity: {
     availableJP: number | null;
     effectiveWeeks: number | null;
@@ -1204,7 +1205,12 @@ export interface AutoAllocationParams {
 }
 
 export interface AutoAllocationResult {
-  status: 'SUCCESS' | 'NOT_READY' | 'INSUFFICIENT_EFFECTIVE_WEEKS' | 'NO_ITEMS';
+  status:
+    | 'SUCCESS'
+    | 'NOT_READY'
+    | 'INSUFFICIENT_EFFECTIVE_WEEKS'
+    | 'INSUFFICIENT_ATP_CAPACITY'
+    | 'NO_ITEMS';
   allocations: TimeAllocation[];
   s1ItemsCount: number;
   s2ItemsCount: number;
@@ -1328,6 +1334,9 @@ export function buildAutomaticSemesterAllocations(
   const availableJP = targetCap.availableJP!;
   const weeklyJP = targetCap.actualScheduledWeeklyJP!;
 
+  const reservedJP = Math.max(0, Number(params.reservedNonAtpJP) || 0);
+  const targetATPAvailableJP = availableJP - reservedJP;
+
   if (targetItems.length === 0) {
     return {
       status: 'SUCCESS',
@@ -1338,7 +1347,18 @@ export function buildAutomaticSemesterAllocations(
     };
   }
 
-  // 3. Batasi jika jumlah item ATP melebihi minggu efektif (Fail Closed)
+  // 3. Batasi jika alokasi non-ATP menghabiskan kapasitas JP semester aktif
+  if (targetATPAvailableJP <= 0) {
+    return {
+      status: 'INSUFFICIENT_ATP_CAPACITY',
+      allocations: [],
+      s1ItemsCount: partition.s1Items.length,
+      s2ItemsCount: partition.s2Items.length,
+      message: `Kapasitas JP tidak mencukupi untuk ATP setelah dikurangi alokasi non-ATP (${reservedJP} JP dari total ${availableJP} JP tersedia).`,
+    };
+  }
+
+  // 4. Batasi jika jumlah item ATP melebihi minggu efektif (Fail Closed)
   if (targetItems.length > effectiveWeeks) {
     return {
       status: 'INSUFFICIENT_EFFECTIVE_WEEKS',
@@ -1349,7 +1369,7 @@ export function buildAutomaticSemesterAllocations(
     };
   }
 
-  // 4. Distribusi pekan kontigu secara seimbang
+  // 5. Distribusi pekan kontigu secara seimbang
   const n = targetItems.length;
   const baseWeeks = Math.floor(effectiveWeeks / n);
   const remainder = effectiveWeeks % n;
@@ -1370,22 +1390,25 @@ export function buildAutomaticSemesterAllocations(
     currentWeek = norm.endWeek + 1;
   }
 
-  // 5. Alokasi JP berdasar weekly JP aktual dan sinkronisasi tepat ke availableJP
+  // 6. Alokasi JP berdasar weekly JP aktual dan sinkronisasi tepat ke targetATPAvailableJP
   const rawJPs = itemWeekCounts.map((w) => w * weeklyJP);
   const totalRawJP = rawJPs.reduce((a, b) => a + b, 0);
-  const diff = availableJP - totalRawJP;
+  const diff = targetATPAvailableJP - totalRawJP;
 
   const allocatedJPs = [...rawJPs];
   if (diff !== 0) {
     if (allocatedJPs[allocatedJPs.length - 1] + diff > 0) {
       allocatedJPs[allocatedJPs.length - 1] += diff;
     } else {
-      let remaining = availableJP;
+      let remaining = targetATPAvailableJP;
       for (let i = 0; i < n; i++) {
         if (i === n - 1) {
           allocatedJPs[i] = Math.max(1, remaining);
         } else {
-          const share = Math.max(1, Math.floor((rawJPs[i] / totalRawJP) * availableJP));
+          const share = Math.max(
+            1,
+            Math.floor((rawJPs[i] / (totalRawJP || 1)) * targetATPAvailableJP)
+          );
           allocatedJPs[i] = share;
           remaining -= share;
         }
@@ -1393,7 +1416,7 @@ export function buildAutomaticSemesterAllocations(
     }
   }
 
-  // 6. Buat objek TimeAllocation kanonikal
+  // 7. Buat objek TimeAllocation kanonikal
   const allocations: TimeAllocation[] = targetItems.map((item, idx) => {
     const range = weekRanges[idx];
     const jp = allocatedJPs[idx];
