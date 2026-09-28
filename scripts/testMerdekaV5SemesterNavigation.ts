@@ -524,16 +524,17 @@ runTest('17. V3 Storage Sentinel remains byte-identical throughout semester oper
 });
 
 // -----------------------------------------------------------------------------
-// TEST 18: Academic Calendar Activated in B.4.1, Other Handlers Remain Unactivated
+// TEST 18: Academic Calendar & Time Allocation Activated in B.4.1 & B.4.2, Other Handlers Remain Unactivated
 // -----------------------------------------------------------------------------
-runTest('18. Academic Calendar persistence is activated in B.4.1, remaining B.4 save handlers remain no-op', () => {
+runTest('18. Academic Calendar & Time Allocation persistence are activated, remaining B.4 save handlers remain no-op', () => {
   assert.ok(
     appSource.includes('saveAcademicCalendarV5(activeSemesterPlan.id,'),
     'handleSaveCalendar must call saveAcademicCalendarV5 in B.4.1'
   );
   assert.ok(
-    appSource.includes('const handleSaveTimeAllocations = (allocs: any[]) => {};'),
-    'handleSaveTimeAllocations must remain no-op'
+    appSource.includes('saveTimeAllocationV5(activeSemesterPlan.id, allocations);') &&
+      appSource.includes('refreshV5();'),
+    'handleSaveTimeAllocations must call saveTimeAllocationV5 scoped to activeSemesterPlan.id followed by refreshV5()'
   );
   assert.ok(
     appSource.includes('const handleSaveStudents = (stdList: any[]) => {};'),
