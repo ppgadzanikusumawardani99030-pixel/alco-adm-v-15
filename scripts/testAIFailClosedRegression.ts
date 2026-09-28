@@ -283,7 +283,7 @@ runTest('Scope Test 18: >1 scope -> multiple scopes resolved for explicit select
 runTest('Scope Test 19: selected scope canonical IDs preserved accurately', () => {
   const tp1: TPItem = { id: 'tp-canonical-101', code: 'TP 4.1', statement: 'Membaca nyaring', competence: '', contentScope: '', order: 1 };
   const atp1: ATPItem = { id: 'atp-canonical-202', tpId: 'tp-canonical-101', stepNumber: 1, materialScope: 'Teks Pendek' };
-  const scopes = resolveAvailableScopes({ items: [tp1] } as any, { items: [atp1] } as any);
+  const scopes = resolveAvailableScopes({ items: [tp1] } as any, { items: [atp1], workflowStatus: 'SIAP' } as any);
   assert.strictEqual(scopes.length, 1);
   assert.strictEqual(scopes[0].linkedTpIds[0], 'tp-canonical-101');
   assert.strictEqual(scopes[0].linkedAtpItemIds[0], 'atp-canonical-202');

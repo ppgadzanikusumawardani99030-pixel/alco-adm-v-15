@@ -573,7 +573,11 @@ app.post('/api/ai/generate-tp', async (req, res) => {
   }
 
   if (!process.env.GEMINI_API_KEY) {
-    return res.status(503).json({ error: 'Layanan AI belum dikonfigurasi (GEMINI_API_KEY tidak terpasang).' });
+    return res.status(503).json({
+      success: false,
+      code: 'AI_NOT_CONFIGURED',
+      error: 'Layanan AI belum dikonfigurasi pada server.',
+    });
   }
 
   try {
@@ -709,7 +713,11 @@ app.post('/api/ai/generate-atp', async (req, res) => {
 
   // 4. Check AI configuration (GEMINI_API_KEY)
   if (!process.env.GEMINI_API_KEY) {
-    return res.status(503).json({ error: 'Layanan AI belum dikonfigurasi (GEMINI_API_KEY tidak terpasang).' });
+    return res.status(503).json({
+      success: false,
+      code: 'AI_NOT_CONFIGURED',
+      error: 'Layanan AI belum dikonfigurasi pada server.',
+    });
   }
 
   try {
@@ -990,7 +998,11 @@ app.post('/api/ai/generate-learning-plan', async (req, res) => {
   }
 
   if (!process.env.GEMINI_API_KEY) {
-    return res.status(503).json({ error: 'Layanan AI belum dikonfigurasi (GEMINI_API_KEY tidak terpasang).' });
+    return res.status(503).json({
+      success: false,
+      code: 'AI_NOT_CONFIGURED',
+      error: 'Layanan AI belum dikonfigurasi pada server.',
+    });
   }
 
   try {

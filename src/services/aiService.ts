@@ -50,6 +50,12 @@ export function formatAIErrorMessage(error: any, actionName: string = 'memproses
   if (!error) return `Terjadi kendala saat ${actionName}. Silakan coba lagi.`;
   const raw = (error.message || String(error)).toLowerCase();
 
+  if (raw.includes('layanan ai belum dikonfigurasi') || raw.includes('ai_not_configured')) {
+    return 'Layanan AI belum dikonfigurasi pada server.';
+  }
+  if (raw.includes('starting server') || raw.includes('runtime preview sedang memulai ulang')) {
+    return 'Runtime preview sedang memulai ulang atau mengintersep respons API.';
+  }
   if (raw.includes('503') || raw.includes('high demand') || raw.includes('unavailable') || raw.includes('spikes in demand')) {
     return 'Layanan AI sedang mengalami lonjakan antrean trafik tinggi. Silakan klik tombol "Coba Lagi" dalam beberapa detik.';
   }
@@ -86,6 +92,9 @@ export async function analyzeCPWithAI(params: {
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
+      if (errData.code === 'AI_NOT_CONFIGURED') {
+        throw new Error('Layanan AI belum dikonfigurasi pada server.');
+      }
       throw new Error(errData.error || `Gagal menganalisis CP (Status ${res.status})`);
     }
 
@@ -106,12 +115,19 @@ export async function generateTPWithAI(params: GenerateTPParams): Promise<TPItem
 
     const contentType = res.headers.get('Content-Type') || '';
     if (!contentType.includes('application/json')) {
+      const text = await res.text().catch(() => '');
+      if (text.includes('Starting Server')) {
+        throw new Error('Runtime preview sedang memulai ulang atau mengintersep respons API.');
+      }
       const mime = contentType.split(';')[0]?.trim() || contentType || 'unknown';
-      throw new Error(`Endpoint AI TP tidak mengembalikan JSON (received ${mime}). Pastikan aplikasi dijalankan melalui backend Express/API, bukan static/Vite preview. (Status ${res.status})`);
+      throw new Error(`Endpoint AI TP tidak mengembalikan JSON (received ${mime}). (Status ${res.status})`);
     }
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
+      if (errData.code === 'AI_NOT_CONFIGURED') {
+        throw new Error('Layanan AI belum dikonfigurasi pada server.');
+      }
       throw new Error(errData.error || `Gagal menghasilkan TP dengan AI (Status ${res.status})`);
     }
 
@@ -171,6 +187,9 @@ export async function generateLearningPlanWithAI(params: GenerateLearningPlanPar
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
+      if (errData.code === 'AI_NOT_CONFIGURED') {
+        throw new Error('Layanan AI belum dikonfigurasi pada server.');
+      }
       throw new Error(errData.error || `Gagal menyusun draf Modul Ajar AI (Status ${res.status})`);
     }
 
@@ -258,6 +277,9 @@ export async function generateATPWithAI(params: GenerateATPParams): Promise<Gene
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
+      if (errData.code === 'AI_NOT_CONFIGURED') {
+        throw new Error('Layanan AI belum dikonfigurasi pada server.');
+      }
       throw new Error(errData.error || `Gagal menyusun ATP dengan AI (Status ${res.status})`);
     }
 
