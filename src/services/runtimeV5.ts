@@ -3,6 +3,7 @@ import {
   SchoolData,
   YearPlan,
   SemesterPlan,
+  SemesterJPSetting,
 } from '../types';
 import { AdministrationWorkspaceV5 } from '../types/storageV5';
 import {
@@ -25,6 +26,7 @@ export interface RuntimeContextV5 {
 
   annualData: AnnualDataV5Result | undefined;
   semesterData: SemesterDataV5Result | undefined;
+  semesterJPSetting: SemesterJPSetting | undefined;
 
   curriculumRuntimeStatus: 'READY' | 'K13_DEFERRED' | 'NO_YEAR_PLAN';
 }
@@ -164,6 +166,12 @@ export function getRuntimeContextV5(): RuntimeContextV5 {
     curriculumRuntimeStatus = 'READY';
   }
 
+  const semesterJPSetting = activeSemesterPlan
+    ? state.semesterJPSettings.find(
+        (e) => e.semesterPlanId === activeSemesterPlan.id
+      )?.value
+    : undefined;
+
   return {
     activeProfile,
     activeSchool,
@@ -175,6 +183,7 @@ export function getRuntimeContextV5(): RuntimeContextV5 {
     activeSemesterPlan,
     annualData,
     semesterData,
+    semesterJPSetting,
     curriculumRuntimeStatus,
   };
 }

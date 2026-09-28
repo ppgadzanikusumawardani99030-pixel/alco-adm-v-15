@@ -22,6 +22,8 @@ import {
   SemesterPlan,
   AcademicCalendar,
   CalendarDay,
+  TimeAllocation,
+  SemesterJPSetting,
 } from './types';
 import {
   AppStorageStateV5,
@@ -47,6 +49,8 @@ import {
   saveTPV5,
   saveATPV5,
   saveAcademicCalendarV5,
+  saveSemesterJPSettingV5,
+  saveTimeAllocationV5,
 } from './services/storageV5';
 import { getRuntimeContextV5 } from './services/runtimeV5';
 import {
@@ -699,7 +703,11 @@ export function App() {
   };
 
   // Handlers for Interconnected Administration Modules (Transitional)
-  const handleSaveCalendar = (cal: AcademicCalendar, days: CalendarDay[]) => {
+  const handleSaveCalendar = (
+    cal: AcademicCalendar,
+    days: CalendarDay[],
+    actualWeeklyJP?: number | null
+  ) => {
     if (!activeSemesterPlan || !activeYearPlan) {
       setAppNotice({
         type: 'error',
@@ -715,6 +723,7 @@ export function App() {
         academicSettingId: activeSemesterPlan.id,
         academicYear: activeYearPlan.academicYear,
         semester: activeSemesterPlan.semester === 1 ? '1 (Ganjil)' : '2 (Genap)',
+        workflowStatus: 'CONFIRMED',
       };
 
       const canonicalDays = (days || []).map((day) => ({
@@ -727,6 +736,18 @@ export function App() {
         days: canonicalDays,
       });
 
+      // Save SemesterJPSetting SSOT
+      const isJPProvided =
+        typeof actualWeeklyJP === 'number' && Number.isFinite(actualWeeklyJP) && actualWeeklyJP > 0;
+
+      const semesterJPSetting: SemesterJPSetting = {
+        semesterPlanId: activeSemesterPlan.id,
+        actualScheduledWeeklyJP: isJPProvided ? actualWeeklyJP : null,
+        source: isJPProvided ? 'TEACHER_CONFIRMED' : 'UNRESOLVED',
+      };
+
+      saveSemesterJPSettingV5(activeSemesterPlan.id, semesterJPSetting);
+
       refreshV5();
     } catch (err: any) {
       setAppNotice({
@@ -735,7 +756,26 @@ export function App() {
       });
     }
   };
-  const handleSaveTimeAllocations = (allocs: any[]) => {};
+
+  const handleSaveTimeAllocations = (allocations: TimeAllocation[]) => {
+    if (!activeSemesterPlan) {
+      setAppNotice({
+        type: 'error',
+        message: 'Pilih Semester aktif terlebih dahulu sebelum menyimpan alokasi waktu.',
+      });
+      return;
+    }
+
+    try {
+      saveTimeAllocationV5(activeSemesterPlan.id, allocations);
+      refreshV5();
+    } catch (err: any) {
+      setAppNotice({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gagal menyimpan alokasi waktu semester.',
+      });
+    }
+  };
   const handleSaveStudents = (stdList: any[]) => {};
   const handleSaveAttendance = (session: any, records: any[]) => {};
   const handleSaveCriteria = (criteria: any[]) => {};
@@ -1001,7 +1041,8 @@ export function App() {
               students={[]}
               calendar={runtimeContext.semesterData?.academicCalendar?.calendar}
               calendarDays={runtimeContext.semesterData?.academicCalendar?.days || []}
-              timeAllocations={[]}
+              timeAllocations={runtimeContext.semesterData?.timeAllocation || []}
+              semesterJPSetting={runtimeContext.semesterJPSetting}
               attendanceSessions={[]}
               attendanceRecords={[]}
               assessmentCriteria={[]}

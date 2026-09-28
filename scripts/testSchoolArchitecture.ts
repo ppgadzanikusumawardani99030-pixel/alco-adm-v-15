@@ -27,20 +27,18 @@ import { TeacherProfile, SchoolData } from '../src/types';
 
 // Mock localStorage in Node.js environment
 const memoryStore: Record<string, string> = {};
-if (typeof globalThis.localStorage === 'undefined') {
-  (globalThis as any).localStorage = {
-    getItem: (key: string) => memoryStore[key] || null,
-    setItem: (key: string, value: string) => {
-      memoryStore[key] = value;
-    },
-    removeItem: (key: string) => {
-      delete memoryStore[key];
-    },
-    clear: () => {
-      Object.keys(memoryStore).forEach((k) => delete memoryStore[k]);
-    },
-  };
-}
+(globalThis as any).localStorage = {
+  getItem: (key: string) => memoryStore[key] || null,
+  setItem: (key: string, value: string) => {
+    memoryStore[key] = value;
+  },
+  removeItem: (key: string) => {
+    delete memoryStore[key];
+  },
+  clear: () => {
+    Object.keys(memoryStore).forEach((k) => delete memoryStore[k]);
+  },
+};
 
 function assert(condition: boolean, testName: string, detail?: string) {
   if (!condition) {

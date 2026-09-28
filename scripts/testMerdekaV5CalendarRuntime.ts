@@ -173,7 +173,7 @@ runTest('4C. Manual override and online candidate selection update draft state o
   assert.ok(confirmMatch, 'handleConfirmCalendar function must exist');
   const confirmBody = confirmMatch[0];
   assert.ok(
-    confirmBody.includes('onSaveCalendar(res.calendar, res.days);'),
+    confirmBody.includes('onSaveCalendar(res.calendar, res.days'),
     'handleConfirmCalendar MUST be the sole trigger calling onSaveCalendar'
   );
 });
@@ -514,7 +514,7 @@ runTest('15. Saving calendar updates existing SemesterPlan calendar entry withou
 });
 
 // -----------------------------------------------------------------------------
-// TEST 16: Fake 18 Weeks Absent in AdministrationHub
+// TEST 16: Actual Calendar Status in AdministrationHub
 // -----------------------------------------------------------------------------
 runTest('16. AdministrationHub badge does not fabricate 18 Mg when calendar is missing', () => {
   assert.ok(
@@ -522,8 +522,15 @@ runTest('16. AdministrationHub badge does not fabricate 18 Mg when calendar is m
     'AdministrationHub must not use `${calendar?.effectiveWeeks || 18} Mg`'
   );
   assert.ok(
-    adminHubSource.includes("calendar?.effectiveWeeks ? `${calendar.effectiveWeeks} Mg` : 'Belum diatur'"),
-    'AdministrationHub must show "Belum diatur" or "-" when effectiveWeeks is absent'
+    !adminHubSource.includes('calendar?.effectiveWeeks'),
+    'AdministrationHub must not determine badge from calendar?.effectiveWeeks'
+  );
+  assert.ok(
+    adminHubSource.includes("workflowStatus === 'CONFIRMED'") &&
+      adminHubSource.includes("'Ditetapkan'") &&
+      adminHubSource.includes("'Sudah dihitung'") &&
+      adminHubSource.includes("'Belum diatur'"),
+    'AdministrationHub must use actual calendar status (Ditetapkan, Sudah dihitung, Belum diatur)'
   );
 });
 
@@ -736,7 +743,7 @@ runTest('BE. Draft only: Applying online candidate updates draft states without 
   );
   assert.ok(
     tpmSource.includes('handleConfirmCalendar = () => {') &&
-      tpmSource.includes('onSaveCalendar(res.calendar, res.days);'),
+      tpmSource.includes('onSaveCalendar(res.calendar, res.days'),
     'Confirm button (handleConfirmCalendar) must be the sole persistence gate calling onSaveCalendar'
   );
 });

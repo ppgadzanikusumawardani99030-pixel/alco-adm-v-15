@@ -144,10 +144,10 @@ export const CalendarWorkflowHeader: React.FC<CalendarWorkflowHeaderProps> = ({
                 type="button"
                 onClick={onConfirmWorkflow}
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-2xs transition-colors"
-                title="Kunci dan konfirmasi kalender pendidikan ini"
+                title="Simpan dan tetapkan kalender pendidikan ini"
               >
                 <Check className="w-4 h-4" />
-                <span>Konfirmasi Kalender</span>
+                <span>Simpan &amp; Tetapkan Kalender</span>
               </button>
             )}
 

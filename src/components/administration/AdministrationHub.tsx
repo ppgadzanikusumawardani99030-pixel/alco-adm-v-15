@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   CalendarDays,
   Users,
@@ -38,6 +38,7 @@ import {
   LearningPlan,
   AssessmentPlan,
   AssessmentPackage,
+  SemesterJPSetting,
 } from '../../types';
 import { TimePlanningManager } from './TimePlanningManager';
 import { AttendanceManager } from './AttendanceManager';
@@ -85,8 +86,9 @@ interface AdministrationHubProps {
   learningPlans?: LearningPlan[];
   assessmentPlans?: AssessmentPlan[];
   assessmentPackages?: AssessmentPackage[];
+  semesterJPSetting?: SemesterJPSetting;
   initialTab?: AdministrationTab;
-  onSaveCalendar: (calendar: AcademicCalendar, days: CalendarDay[]) => void;
+  onSaveCalendar: (calendar: AcademicCalendar, days: CalendarDay[], actualScheduledWeeklyJP?: number | null) => void;
   onSaveTimeAllocations: (allocations: TimeAllocation[]) => void;
   onSaveStudents: (students: Student[]) => void;
   onSaveAttendance: (session: AttendanceSession, records: AttendanceRecord[]) => void;
@@ -120,6 +122,7 @@ export const AdministrationHub: React.FC<AdministrationHubProps> = ({
   calendar,
   calendarDays = [],
   timeAllocations = [],
+  semesterJPSetting,
   attendanceSessions = [],
   attendanceRecords = [],
   assessmentCriteria = [],
@@ -179,13 +182,40 @@ export const AdministrationHub: React.FC<AdministrationHubProps> = ({
     }
   };
 
+  const calendarBadge = useMemo(() => {
+    if (calendar?.workflowStatus === 'CONFIRMED') {
+      return 'Ditetapkan';
+    }
+    const hasGeneratedEffectiveBaseline =
+      calendar?.sourceType === 'GENERATED_EFFECTIVE_BASELINE' ||
+      calendarDays?.some(
+        (d) =>
+          d.sourceLayer === 'GENERATED_EFFECTIVE_BASELINE' ||
+          d.sourceType === 'GENERATED_EFFECTIVE_BASELINE'
+      );
+    if (hasGeneratedEffectiveBaseline) {
+      return 'Sudah dihitung';
+    }
+    return 'Belum diatur';
+  }, [calendar?.workflowStatus, calendar?.sourceType, calendarDays]);
+
+  const totalPlannedJP = useMemo(() => {
+    if (!timeAllocations || timeAllocations.length === 0) {
+      return null;
+    }
+    return timeAllocations.reduce(
+      (sum, item) => sum + (Number(item.allocatedJP ?? item.jp) || 0),
+      0
+    );
+  }, [timeAllocations]);
+
   const tabs = [
     {
       id: 'time_planning' as AdministrationTab,
       label: 'Perencanaan Waktu',
       sublabel: 'Kalender & Alokasi JP',
       icon: CalendarDays,
-      badge: calendar?.effectiveWeeks ? `${calendar.effectiveWeeks} Mg` : 'Belum diatur',
+      badge: calendarBadge,
     },
     {
       id: 'learning_plan' as AdministrationTab,
@@ -268,7 +298,9 @@ export const AdministrationHub: React.FC<AdministrationHubProps> = ({
                   <span>
                     {isK13Active
                       ? `${k13Analysis?.items?.length || 0} Butir KD`
-                      : `${atp?.items?.reduce((a, b) => a + (Number(b.jp) || 0), 0) || 0} Total JP`}
+                      : totalPlannedJP !== null
+                      ? `${totalPlannedJP} Total JP`
+                      : 'Belum dialokasikan'}
                   </span>
                 </span>
               </div>
@@ -351,6 +383,7 @@ export const AdministrationHub: React.FC<AdministrationHubProps> = ({
             calendar={calendar}
             calendarDays={calendarDays}
             timeAllocations={timeAllocations}
+            semesterJPSetting={semesterJPSetting}
             onSaveCalendar={onSaveCalendar}
             onSaveTimeAllocations={onSaveTimeAllocations}
           />
