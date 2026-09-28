@@ -21,7 +21,10 @@ import {
   resolveSemester,
   validateTimeAllocations,
   normalizeWeekRange,
+  buildAutomaticSemesterAllocations,
+  resolveSemesterCapacityV5,
 } from '../../services/jpEngine';
+import { loadStorageV5 } from '../../services/storageV5';
 import {
   resolveOfficialCalendar,
   applyManualCalendarOverride,
@@ -938,6 +941,185 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
     onSaveTimeAllocations(allocations);
     setSaveNotification('Pemetaan Alokasi Waktu Pembelajaran berhasil disimpan!');
     setTimeout(() => setSaveNotification(null), 3000);
+  };
+
+  // Readiness for automatic ATP allocation across Semester 1 & 2
+  const autoAllocationReadiness = useMemo(() => {
+    if (isK13Curriculum || !atp?.items || atp.items.length === 0) {
+      return {
+        isReady: false,
+        s1Capacity: null,
+        s2Capacity: null,
+        sem1PlanId: null,
+        sem2PlanId: null,
+        disabledReason: 'Bukan Kurikulum Merdeka atau belum ada item ATP tahunan.',
+      };
+    }
+
+    try {
+      const v5State = loadStorageV5();
+      const yearPlanId = academicSetting.id
+        ? (v5State.semesterPlans.find((sp) => sp.id === academicSetting.id)?.yearPlanId ||
+            v5State.activeYearPlanId)
+        : v5State.activeYearPlanId;
+
+      const semesterPlans = yearPlanId
+        ? v5State.semesterPlans.filter((sp) => sp.yearPlanId === yearPlanId)
+        : v5State.semesterPlans;
+
+      const sem1Plan = semesterPlans.find((sp) => sp.semester === 1);
+      const sem2Plan = semesterPlans.find((sp) => sp.semester === 2);
+
+      if (!sem1Plan || !sem2Plan) {
+        return {
+          isReady: false,
+          s1Capacity: null,
+          s2Capacity: null,
+          sem1PlanId: null,
+          sem2PlanId: null,
+          disabledReason: 'Rencana Semester 1 dan 2 belum lengkap pada Tahun Ajaran aktif.',
+        };
+      }
+
+      const activePlanId = academicSetting.id;
+      const isSem1Active = activePlanId === sem1Plan.id || semester === '1';
+
+      const s1Override = isSem1Active
+        ? {
+            calendar: calendar ? { ...calendar, workflowStatus } : undefined,
+            calendarDays: days,
+            semesterJPSetting:
+              semesterJPSetting ||
+              (jpPerWeek
+                ? {
+                    semesterPlanId: sem1Plan.id,
+                    actualScheduledWeeklyJP: jpPerWeek,
+                    source: 'TEACHER_CONFIRMED' as const,
+                  }
+                : undefined),
+          }
+        : undefined;
+
+      const s2Override = !isSem1Active
+        ? {
+            calendar: calendar ? { ...calendar, workflowStatus } : undefined,
+            calendarDays: days,
+            semesterJPSetting:
+              semesterJPSetting ||
+              (jpPerWeek
+                ? {
+                    semesterPlanId: sem2Plan.id,
+                    actualScheduledWeeklyJP: jpPerWeek,
+                    source: 'TEACHER_CONFIRMED' as const,
+                  }
+                : undefined),
+          }
+        : undefined;
+
+      const s1Cap = resolveSemesterCapacityV5(sem1Plan.id, v5State, s1Override);
+      const s2Cap = resolveSemesterCapacityV5(sem2Plan.id, v5State, s2Override);
+
+      const isReady = s1Cap.isReady && s2Cap.isReady;
+      const disabledReason = !isReady
+        ? 'Lengkapi kalender dan JP aktual Semester 1 & 2 agar pembagian ATP tahunan dapat dihitung secara konsisten.'
+        : undefined;
+
+      return {
+        isReady,
+        s1Capacity: s1Cap,
+        s2Capacity: s2Cap,
+        sem1PlanId: sem1Plan.id,
+        sem2PlanId: sem2Plan.id,
+        disabledReason,
+      };
+    } catch {
+      return {
+        isReady: false,
+        s1Capacity: null,
+        s2Capacity: null,
+        sem1PlanId: null,
+        sem2PlanId: null,
+        disabledReason:
+          'Lengkapi kalender dan JP aktual Semester 1 & 2 agar pembagian ATP tahunan dapat dihitung secara konsisten.',
+      };
+    }
+  }, [
+    isK13Curriculum,
+    atp,
+    academicSetting.id,
+    semester,
+    calendar,
+    workflowStatus,
+    days,
+    semesterJPSetting,
+    jpPerWeek,
+  ]);
+
+  const handleAutoAllocate = () => {
+    if (
+      !autoAllocationReadiness.isReady ||
+      !autoAllocationReadiness.s1Capacity ||
+      !autoAllocationReadiness.s2Capacity
+    ) {
+      return;
+    }
+
+    // Check if existing allocations already have ATP_ITEM allocations
+    const hasExistingAtp = allocations.some(
+      (a) =>
+        a.sourceType === 'ATP_ITEM' ||
+        Boolean(a.atpItemId) ||
+        (a.allocatedJP !== undefined && a.allocatedJP !== null && a.allocatedJP > 0)
+    );
+
+    if (hasExistingAtp) {
+      const confirmReplace =
+        typeof window !== 'undefined' && typeof window.confirm === 'function'
+          ? window.confirm(
+              'Alokasi semester ini sudah memiliki perubahan. Susun ulang otomatis akan mengganti alokasi ATP semester ini. Lanjutkan?'
+            )
+          : true;
+      if (!confirmReplace) {
+        return;
+      }
+    }
+
+    const targetSem = semester === '2' ? '2' : '1';
+    const planId =
+      academicSetting.id ||
+      (targetSem === '1'
+        ? autoAllocationReadiness.sem1PlanId!
+        : autoAllocationReadiness.sem2PlanId!);
+
+    const autoResult = buildAutomaticSemesterAllocations({
+      annualATPItems: atp?.items || [],
+      targetSemester: targetSem,
+      semesterPlanId: planId,
+      s1Capacity: autoAllocationReadiness.s1Capacity,
+      s2Capacity: autoAllocationReadiness.s2Capacity,
+    });
+
+    if (autoResult.status === 'SUCCESS') {
+      // Preserve non-ATP allocations (e.g. ASSESSMENT, RESERVE, etc.)
+      const nonAtpAllocations = allocations.filter(
+        (a) =>
+          a.sourceType !== 'ATP_ITEM' &&
+          !a.atpItemId &&
+          a.sourceType !== undefined &&
+          a.sourceType !== 'KD'
+      );
+      const updatedAllocations = [...nonAtpAllocations, ...autoResult.allocations];
+      setAllocations(updatedAllocations);
+      setSaveNotification(
+        'Alokasi waktu semester berhasil disusun otomatis! Silakan tinjau dan klik "Simpan Pemetaan Waktu".'
+      );
+      setTimeout(() => setSaveNotification(null), 4000);
+    } else {
+      setSaveNotification(
+        `Gagal menyusun alokasi otomatis: ${autoResult.message || 'Kapasitas tidak mencukupi'}`
+      );
+      setTimeout(() => setSaveNotification(null), 4000);
+    }
   };
 
   const handleExportKalender = async () => {
@@ -1944,15 +2126,43 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
             </div>
           </div>
 
-          <button
-            id="btn-save-time-allocations"
-            type="button"
-            onClick={handleSaveAllocations}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
-          >
-            <Save className="w-4 h-4" />
-            <span>Simpan Pemetaan Waktu</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            {!isK13Curriculum && (
+              <div className="relative group">
+                <button
+                  id="btn-auto-allocate-time"
+                  type="button"
+                  disabled={!autoAllocationReadiness.isReady}
+                  onClick={handleAutoAllocate}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg border transition-all ${
+                    autoAllocationReadiness.isReady
+                      ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100 cursor-pointer shadow-xs active:scale-95'
+                      : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-75'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 text-indigo-500" />
+                  <span>Susun Alokasi Otomatis</span>
+                </button>
+
+                {!autoAllocationReadiness.isReady && autoAllocationReadiness.disabledReason && (
+                  <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block w-72 p-2.5 bg-slate-900 text-white text-[11px] leading-relaxed rounded-lg shadow-xl z-50 pointer-events-none">
+                    <div className="font-semibold text-amber-300 mb-0.5">Syarat Susun Alokasi Otomatis:</div>
+                    {autoAllocationReadiness.disabledReason}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <button
+              id="btn-save-time-allocations"
+              type="button"
+              onClick={handleSaveAllocations}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+            >
+              <Save className="w-4 h-4" />
+              <span>Simpan Pemetaan Waktu</span>
+            </button>
+          </div>
         </div>
 
         {isK13Curriculum ? (

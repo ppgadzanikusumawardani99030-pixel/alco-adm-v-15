@@ -94,6 +94,9 @@ jobs:
       - name: Test Semester Time Allocation Editor
         run: npx tsx scripts/testSemesterTimeAllocationEditor.ts
 
+      - name: Test Automatic Semester Time Allocation
+        run: npx tsx scripts/testAutoSemesterTimeAllocation.ts
+
       - name: Test Profile School Binding V5
         run: npx tsx scripts/testProfileSchoolBindingV5.ts
 

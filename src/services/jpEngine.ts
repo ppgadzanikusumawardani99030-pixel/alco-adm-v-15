@@ -18,6 +18,7 @@ import {
   EffectiveWeekInfo,
   CanonicalDayStatus,
   CalendarCompletenessResult,
+  SemesterJPSetting,
 } from '../types';
 import {
   calculateTeacherWorkload,
@@ -1160,4 +1161,353 @@ export function validateTeacherTeachingLoad(
   teacherName?: string
 ): TeacherLoadValidationResult {
   return calculateTeacherWorkload(assignments, additionalDuties, teacherName);
+}
+
+/**
+ * Kapasitas dan Kesiapan Semester untuk Auto-Allocation ATP
+ */
+export interface SemesterCapacityInfo {
+  semesterPlanId: string;
+  semester: '1' | '2';
+  isCalendarConfirmed: boolean;
+  effectiveWeeks: number | null;
+  effectiveLearningDays: number | null;
+  actualScheduledWeeklyJP: number | null;
+  availableJP: number | null;
+  isReady: boolean;
+  unreadyReason?: string;
+}
+
+export interface ATPPartitionResult<T> {
+  s1Items: T[];
+  s2Items: T[];
+  s1Share: number;
+  s2Share: number;
+}
+
+export interface AutoAllocationParams {
+  annualATPItems: Array<{ id: string; stepNumber?: number; [key: string]: any }>;
+  targetSemester: '1' | '2';
+  semesterPlanId: string;
+  s1Capacity: {
+    availableJP: number | null;
+    effectiveWeeks: number | null;
+    actualScheduledWeeklyJP: number | null;
+    isCalendarConfirmed: boolean;
+  };
+  s2Capacity: {
+    availableJP: number | null;
+    effectiveWeeks: number | null;
+    actualScheduledWeeklyJP: number | null;
+    isCalendarConfirmed: boolean;
+  };
+}
+
+export interface AutoAllocationResult {
+  status: 'SUCCESS' | 'NOT_READY' | 'INSUFFICIENT_EFFECTIVE_WEEKS' | 'NO_ITEMS';
+  allocations: TimeAllocation[];
+  s1ItemsCount: number;
+  s2ItemsCount: number;
+  message?: string;
+}
+
+/**
+ * Partisi Deterministik ATP Tahunan Antar Semester berdasarkan Proporsi Kapasitas (S1 & S2)
+ */
+export function partitionAnnualATP<T extends { stepNumber?: number }>(
+  annualATPItems: T[],
+  s1AvailableJP: number,
+  s2AvailableJP: number
+): ATPPartitionResult<T> {
+  const sortedItems = [...annualATPItems].sort((a, b) => {
+    const stepA = typeof a.stepNumber === 'number' ? a.stepNumber : 0;
+    const stepB = typeof b.stepNumber === 'number' ? b.stepNumber : 0;
+    return stepA - stepB;
+  });
+
+  const totalItems = sortedItems.length;
+  const s1Cap = Math.max(0, s1AvailableJP || 0);
+  const s2Cap = Math.max(0, s2AvailableJP || 0);
+  const totalCapacity = s1Cap + s2Cap;
+
+  if (totalItems === 0 || totalCapacity === 0) {
+    return {
+      s1Items: [],
+      s2Items: [],
+      s1Share: 0,
+      s2Share: 0,
+    };
+  }
+
+  const s1Share = s1Cap / totalCapacity;
+  const s2Share = s2Cap / totalCapacity;
+
+  let s1Count = Math.round(totalItems * s1Share);
+
+  // Jika kedua semester memiliki kapasitas > 0 dan total item > 1, cegah salah satu semester bernilai 0
+  if (totalItems > 1 && s1Cap > 0 && s2Cap > 0) {
+    if (s1Count < 1) s1Count = 1;
+    if (s1Count > totalItems - 1) s1Count = totalItems - 1;
+  }
+
+  const s1Items = sortedItems.slice(0, s1Count);
+  const s2Items = sortedItems.slice(s1Count);
+
+  return {
+    s1Items,
+    s2Items,
+    s1Share,
+    s2Share,
+  };
+}
+
+/**
+ * Susun Alokasi Waktu Semester Otomatis (ATP Tahunan -> Semester -> Pekan -> JP)
+ */
+export function buildAutomaticSemesterAllocations(
+  params: AutoAllocationParams
+): AutoAllocationResult {
+  const {
+    annualATPItems,
+    targetSemester,
+    semesterPlanId,
+    s1Capacity,
+    s2Capacity,
+  } = params;
+
+  // 1. Validasi Kesiapan Semester 1 & Semester 2
+  const isS1Ready =
+    Boolean(s1Capacity?.isCalendarConfirmed) &&
+    typeof s1Capacity?.actualScheduledWeeklyJP === 'number' &&
+    s1Capacity.actualScheduledWeeklyJP > 0 &&
+    typeof s1Capacity?.effectiveWeeks === 'number' &&
+    s1Capacity.effectiveWeeks > 0 &&
+    typeof s1Capacity?.availableJP === 'number' &&
+    s1Capacity.availableJP > 0;
+
+  const isS2Ready =
+    Boolean(s2Capacity?.isCalendarConfirmed) &&
+    typeof s2Capacity?.actualScheduledWeeklyJP === 'number' &&
+    s2Capacity.actualScheduledWeeklyJP > 0 &&
+    typeof s2Capacity?.effectiveWeeks === 'number' &&
+    s2Capacity.effectiveWeeks > 0 &&
+    typeof s2Capacity?.availableJP === 'number' &&
+    s2Capacity.availableJP > 0;
+
+  if (!isS1Ready || !isS2Ready) {
+    return {
+      status: 'NOT_READY',
+      allocations: [],
+      s1ItemsCount: 0,
+      s2ItemsCount: 0,
+      message:
+        'Lengkapi kalender dan JP aktual Semester 1 & 2 agar pembagian ATP tahunan dapat dihitung secara konsisten.',
+    };
+  }
+
+  if (!annualATPItems || annualATPItems.length === 0) {
+    return {
+      status: 'NO_ITEMS',
+      allocations: [],
+      s1ItemsCount: 0,
+      s2ItemsCount: 0,
+      message: 'Tidak ada item ATP tahunan yang dapat dialokasikan.',
+    };
+  }
+
+  // 2. Partisi ATP deterministik
+  const partition = partitionAnnualATP(
+    annualATPItems,
+    s1Capacity.availableJP!,
+    s2Capacity.availableJP!
+  );
+
+  const targetItems = targetSemester === '1' ? partition.s1Items : partition.s2Items;
+  const targetCap = targetSemester === '1' ? s1Capacity : s2Capacity;
+  const effectiveWeeks = targetCap.effectiveWeeks!;
+  const availableJP = targetCap.availableJP!;
+  const weeklyJP = targetCap.actualScheduledWeeklyJP!;
+
+  if (targetItems.length === 0) {
+    return {
+      status: 'SUCCESS',
+      allocations: [],
+      s1ItemsCount: partition.s1Items.length,
+      s2ItemsCount: partition.s2Items.length,
+      message: 'Tidak ada ATP yang dialokasikan untuk semester ini.',
+    };
+  }
+
+  // 3. Batasi jika jumlah item ATP melebihi minggu efektif (Fail Closed)
+  if (targetItems.length > effectiveWeeks) {
+    return {
+      status: 'INSUFFICIENT_EFFECTIVE_WEEKS',
+      allocations: [],
+      s1ItemsCount: partition.s1Items.length,
+      s2ItemsCount: partition.s2Items.length,
+      message: `Jumlah item ATP (${targetItems.length}) melebihi jumlah minggu efektif (${effectiveWeeks}) pada Semester ${targetSemester}.`,
+    };
+  }
+
+  // 4. Distribusi pekan kontigu secara seimbang
+  const n = targetItems.length;
+  const baseWeeks = Math.floor(effectiveWeeks / n);
+  const remainder = effectiveWeeks % n;
+
+  const itemWeekCounts: number[] = [];
+  for (let i = 0; i < n; i++) {
+    itemWeekCounts.push(baseWeeks + (i < remainder ? 1 : 0));
+  }
+
+  const weekRanges: Array<{ startWeek: number; endWeek: number }> = [];
+  let currentWeek = 1;
+  for (let i = 0; i < n; i++) {
+    const wCount = itemWeekCounts[i];
+    const rawStart = currentWeek;
+    const rawEnd = currentWeek + wCount - 1;
+    const norm = normalizeWeekRange(rawStart, rawEnd, effectiveWeeks);
+    weekRanges.push(norm);
+    currentWeek = norm.endWeek + 1;
+  }
+
+  // 5. Alokasi JP berdasar weekly JP aktual dan sinkronisasi tepat ke availableJP
+  const rawJPs = itemWeekCounts.map((w) => w * weeklyJP);
+  const totalRawJP = rawJPs.reduce((a, b) => a + b, 0);
+  const diff = availableJP - totalRawJP;
+
+  const allocatedJPs = [...rawJPs];
+  if (diff !== 0) {
+    if (allocatedJPs[allocatedJPs.length - 1] + diff > 0) {
+      allocatedJPs[allocatedJPs.length - 1] += diff;
+    } else {
+      let remaining = availableJP;
+      for (let i = 0; i < n; i++) {
+        if (i === n - 1) {
+          allocatedJPs[i] = Math.max(1, remaining);
+        } else {
+          const share = Math.max(1, Math.floor((rawJPs[i] / totalRawJP) * availableJP));
+          allocatedJPs[i] = share;
+          remaining -= share;
+        }
+      }
+    }
+  }
+
+  // 6. Buat objek TimeAllocation kanonikal
+  const allocations: TimeAllocation[] = targetItems.map((item, idx) => {
+    const range = weekRanges[idx];
+    const jp = allocatedJPs[idx];
+    return {
+      id: `alloc-${semesterPlanId}-${item.id}`,
+      academicSettingId: semesterPlanId,
+      sourceType: 'ATP_ITEM',
+      sourceId: item.id,
+      atpItemId: item.id,
+      semester: targetSemester === '1' ? '1 (Ganjil)' : '2 (Genap)',
+      allocatedJP: jp,
+      jp,
+      startWeek: range.startWeek,
+      endWeek: range.endWeek,
+      weekNumber: range.startWeek,
+    };
+  });
+
+  return {
+    status: 'SUCCESS',
+    allocations,
+    s1ItemsCount: partition.s1Items.length,
+    s2ItemsCount: partition.s2Items.length,
+  };
+}
+
+/**
+ * Resolver Kapasitas Semester dari Model Penyimpanan V5
+ */
+export function resolveSemesterCapacityV5(
+  semesterPlanId: string,
+  state: {
+    semesterPlans?: Array<{ id: string; semester: number; yearPlanId: string }>;
+    semesterData?: {
+      academicCalendar?: Array<{ semesterPlanId: string; value?: { calendar?: AcademicCalendar; days?: CalendarDay[] } }>;
+    };
+    semesterJPSettings?: Array<{ semesterPlanId: string; value?: SemesterJPSetting }>;
+  },
+  override?: {
+    calendar?: AcademicCalendar;
+    calendarDays?: CalendarDay[];
+    semesterJPSetting?: SemesterJPSetting;
+  }
+): SemesterCapacityInfo {
+  const sp = state.semesterPlans?.find((s) => s.id === semesterPlanId);
+  const semNumber: '1' | '2' = sp?.semester === 2 ? '2' : '1';
+
+  const calData = override?.calendar
+    ? { calendar: override.calendar, days: override.calendarDays || [] }
+    : state.semesterData?.academicCalendar?.find((e) => e.semesterPlanId === semesterPlanId)?.value;
+
+  const jpSetting = override?.semesterJPSetting
+    ? override.semesterJPSetting
+    : state.semesterJPSettings?.find((e) => e.semesterPlanId === semesterPlanId)?.value;
+
+  const cal = calData?.calendar;
+  const days = calData?.days || [];
+
+  const isCalendarConfirmed = cal?.workflowStatus === 'CONFIRMED';
+  const effectiveDayResult = cal ? calculateEffectiveDays(cal, days) : null;
+  const effectiveLearningDays = effectiveDayResult?.effectiveLearningDays ?? null;
+  const schoolDaysPerWeek =
+    cal?.schoolDaysPerWeek === 5 || cal?.schoolDaysPerWeek === 6
+      ? cal.schoolDaysPerWeek
+      : null;
+
+  const effectiveWeeksRes =
+    effectiveLearningDays !== null && schoolDaysPerWeek !== null
+      ? calculateEffectiveWeeks(effectiveLearningDays, schoolDaysPerWeek)
+      : null;
+
+  const effectiveWeeks =
+    effectiveWeeksRes?.status === 'RESOLVED' ? effectiveWeeksRes.effectiveWeeksRounded : null;
+  const actualScheduledWeeklyJP = jpSetting?.actualScheduledWeeklyJP ?? null;
+
+  let availableJP: number | null = null;
+  if (
+    isCalendarConfirmed &&
+    actualScheduledWeeklyJP !== null &&
+    actualScheduledWeeklyJP > 0 &&
+    effectiveLearningDays !== null &&
+    schoolDaysPerWeek !== null
+  ) {
+    const availRes = calculateAvailableJP({
+      subjectWeeklyJP: actualScheduledWeeklyJP,
+      effectiveLearningDays,
+      schoolDaysPerWeek,
+      weeklyJPSource: 'ACTUAL_SCHEDULE',
+      calendarStatus: 'RESOLVED',
+      effectiveDayStatus: 'RESOLVED',
+    });
+    if (availRes.status === 'RESOLVED') {
+      availableJP = availRes.availableJP;
+    }
+  }
+
+  const isReady = Boolean(
+    isCalendarConfirmed &&
+    actualScheduledWeeklyJP !== null &&
+    actualScheduledWeeklyJP > 0 &&
+    effectiveWeeks !== null &&
+    effectiveWeeks > 0 &&
+    availableJP !== null &&
+    availableJP > 0
+  );
+
+  return {
+    semesterPlanId,
+    semester: semNumber,
+    isCalendarConfirmed,
+    effectiveWeeks,
+    effectiveLearningDays,
+    actualScheduledWeeklyJP,
+    availableJP,
+    isReady,
+  };
 }
