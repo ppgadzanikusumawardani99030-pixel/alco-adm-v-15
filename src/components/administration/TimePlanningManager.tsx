@@ -20,6 +20,7 @@ import {
   getSubjectJP,
   resolveSemester,
   validateTimeAllocations,
+  normalizeWeekRange,
 } from '../../services/jpEngine';
 import {
   resolveOfficialCalendar,
@@ -849,21 +850,14 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
           // Do not create allocation until JP is entered
           return prev;
         }
-        let newStart = value && value >= 1 ? value : 1;
-        if (effectiveWeeks && effectiveWeeks > 0 && newStart > effectiveWeeks) {
-          newStart = effectiveWeeks;
-        }
-        let newEnd = existing.endWeek ?? newStart;
-        if (newEnd < newStart) {
-          newEnd = newStart;
-        }
+        const normalized = normalizeWeekRange(value, existing.endWeek, effectiveWeeks);
 
         const copy = [...prev];
         copy[existingIndex] = {
           ...existing,
-          startWeek: newStart,
-          endWeek: newEnd,
-          weekNumber: newStart,
+          startWeek: normalized.startWeek,
+          endWeek: normalized.endWeek,
+          weekNumber: normalized.startWeek,
         };
         return copy;
       }
@@ -875,15 +869,12 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
           return prev;
         }
         const currentStart = existing.startWeek ?? existing.weekNumber ?? 1;
-        let newEnd = value && value >= currentStart ? value : currentStart;
-        if (effectiveWeeks && effectiveWeeks > 0 && newEnd > effectiveWeeks) {
-          newEnd = effectiveWeeks;
-        }
+        const normalized = normalizeWeekRange(currentStart, value, effectiveWeeks);
 
         const copy = [...prev];
         copy[existingIndex] = {
           ...existing,
-          endWeek: newEnd,
+          endWeek: normalized.endWeek,
         };
         return copy;
       }
@@ -914,8 +905,7 @@ export const TimePlanningManager: React.FC<TimePlanningManagerProps> = ({
           a.atpItemId === itemId ||
           a.tpId === itemId
       );
-      const k13Item = k13Analysis?.items?.find((i) => i.id === itemId);
-      const defaultJP = k13Item?.alokasiJp ? Number(k13Item.alokasiJp) : (jpPerWeek || 0);
+      const defaultJP = jpPerWeek || 0;
 
       if (existingIndex >= 0) {
         const updated = [...prev];

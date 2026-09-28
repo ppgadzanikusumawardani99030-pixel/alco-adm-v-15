@@ -13,7 +13,7 @@ import {
   saveATPV5,
 } from '../src/services/storageV5';
 import { getRuntimeContextV5 } from '../src/services/runtimeV5';
-import { validateTimeAllocations } from '../src/services/jpEngine';
+import { validateTimeAllocations, normalizeWeekRange } from '../src/services/jpEngine';
 import {
   TimeAllocation,
   SemesterJPSetting,
@@ -243,6 +243,41 @@ runTest('3. Valid allocation persists with allocatedJP, startWeek, and endWeek',
 });
 
 // -----------------------------------------------------------------------------
+// TEST 4: Invalid Week Range Normalization and Bounds Locking
+// -----------------------------------------------------------------------------
+runTest('4. Week range bounds normalization locks startWeek >= 1, endWeek >= startWeek, and clamps to effectiveWeeks', () => {
+  const effectiveWeeks = 18;
+
+  // 1. startWeek < 1 -> normalized to 1
+  const c1 = normalizeWeekRange(0, 5, effectiveWeeks);
+  assert.strictEqual(c1.startWeek, 1, 'startWeek 0 must be normalized to 1');
+  assert.strictEqual(c1.endWeek, 5);
+
+  const c1Neg = normalizeWeekRange(-4, 3, effectiveWeeks);
+  assert.strictEqual(c1Neg.startWeek, 1, 'negative startWeek must be normalized to 1');
+  assert.strictEqual(c1Neg.endWeek, 3);
+
+  // 2. endWeek < startWeek -> endWeek = startWeek
+  const c2 = normalizeWeekRange(6, 2, effectiveWeeks);
+  assert.strictEqual(c2.startWeek, 6);
+  assert.strictEqual(c2.endWeek, 6, 'endWeek < startWeek must be set to startWeek');
+
+  const c2Null = normalizeWeekRange(4, null, effectiveWeeks);
+  assert.strictEqual(c2Null.startWeek, 4);
+  assert.strictEqual(c2Null.endWeek, 4, 'missing/null endWeek must default to startWeek');
+
+  // 3. startWeek > effectiveWeeks -> clamped to effectiveWeeks
+  const c3 = normalizeWeekRange(22, 25, effectiveWeeks);
+  assert.strictEqual(c3.startWeek, 18, 'startWeek > effectiveWeeks must be clamped to effectiveWeeks');
+  assert.strictEqual(c3.endWeek, 18, 'endWeek must also be bounded by effectiveWeeks');
+
+  // 4. endWeek > effectiveWeeks -> clamped to effectiveWeeks
+  const c4 = normalizeWeekRange(5, 30, effectiveWeeks);
+  assert.strictEqual(c4.startWeek, 5);
+  assert.strictEqual(c4.endWeek, 18, 'endWeek > effectiveWeeks must be clamped to effectiveWeeks');
+});
+
+// -----------------------------------------------------------------------------
 // TEST 4 & 5 & 6: Capacity Validation (Under, Balanced, Over)
 // -----------------------------------------------------------------------------
 runTest('4, 5 & 6. validateTimeAllocations correctly assesses UNDER_ALLOCATED, BALANCED, and OVER_ALLOCATED', () => {
@@ -353,4 +388,4 @@ runTest('9. Annual ATP Data remains byte-for-byte unchanged throughout semester 
   );
 });
 
-console.log('\nAll 9 Semester Time Allocation Editor & Capacity regression tests PASSED 100%!\n');
+console.log('\nAll Semester Time Allocation Editor & Capacity regression tests PASSED 100%!\n');

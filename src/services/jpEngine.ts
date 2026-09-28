@@ -951,6 +951,35 @@ export function resolveSemester(
 }
 
 /**
+ * Normalisasi batas pekan alokasi waktu (startWeek & endWeek) terhadap kapasitas minggu efektif
+ */
+export function normalizeWeekRange(
+  startWeek: number | undefined | null,
+  endWeek: number | undefined | null,
+  effectiveWeeks?: number | null
+): { startWeek: number; endWeek: number } {
+  let start = startWeek && startWeek >= 1 ? Math.floor(startWeek) : 1;
+  const maxWeeks = effectiveWeeks && effectiveWeeks > 0 ? Math.floor(effectiveWeeks) : null;
+
+  if (maxWeeks !== null && start > maxWeeks) {
+    start = maxWeeks;
+  }
+
+  let end = endWeek && endWeek >= 1 ? Math.floor(endWeek) : start;
+  if (end < start) {
+    end = start;
+  }
+  if (maxWeeks !== null && end > maxWeeks) {
+    end = maxWeeks;
+  }
+  if (end < start) {
+    start = end;
+  }
+
+  return { startWeek: start, endWeek: end };
+}
+
+/**
  * Normalisasi objek alokasi ke model shared LearningTimeAllocation
  */
 export function normalizeLearningAllocation(raw: Partial<LearningTimeAllocation | TimeAllocation>): LearningTimeAllocation {
