@@ -79,9 +79,29 @@ function isAtpReadyForAIScope(atpData?: ATPData | null): boolean {
   return atpData.workflowStatus === 'SIAP' && !atpData.needsReview;
 }
 
+export function resolveAtpItemSemesterJP(
+  atpItem: ATPItem,
+  timeAllocations?: TimeAllocation[] | null
+): number | null {
+  if (!timeAllocations || timeAllocations.length === 0) return null;
+  const match = timeAllocations.find((ta) => {
+    if (ta.sourceType === 'ASSESSMENT' || ta.sourceType === 'RESERVE') return false;
+    const isExact = (ta.sourceId === atpItem.id || ta.atpItemId === atpItem.id);
+    if (!isExact) return false;
+    if (ta.sourceType === 'ATP_ITEM' || !ta.sourceType) return true;
+    return false;
+  });
+  if (match) {
+    if (typeof match.allocatedJP === 'number' && match.allocatedJP > 0) return match.allocatedJP;
+    if (typeof match.jp === 'number' && match.jp > 0) return match.jp;
+  }
+  return null;
+}
+
 export function resolveAvailableScopes(
   tpData?: TPData | null,
-  atpData?: ATPData | null
+  atpData?: ATPData | null,
+  timeAllocations?: TimeAllocation[] | null
 ): LearningPlanScopeUnit[] {
   const availableTps = tpData?.items || [];
   if (availableTps.length === 0) return [];
@@ -95,7 +115,7 @@ export function resolveAvailableScopes(
       representedTpIds.add(linkedTp.id);
       const stepNo = atpItem.stepNumber || index + 1;
       const material = atpItem.materialScope || linkedTp.contentScope || linkedTp.statement;
-      const allocatedJP = atpItem.allocatedJP ?? atpItem.jp ?? null;
+      const allocatedJP = resolveAtpItemSemesterJP(atpItem, timeAllocations);
 
       return {
         id: atpItem.id,
@@ -127,6 +147,8 @@ export function resolveAvailableScopes(
   });
   return [...atpScopes, ...singleTpScopes];
 }
+
+export const buildLearningPlanScopeUnits = resolveAvailableScopes;
 
 interface LearningPlanManagerProps {
   profile: TeacherProfile;
@@ -311,7 +333,7 @@ export const LearningPlanManager: React.FC<LearningPlanManagerProps> = ({
       showNotification('error', 'ATP belum siap untuk digunakan sebagai sumber Draf AI. Tinjau dan selesaikan ATP terlebih dahulu.');
       return;
     }
-    const scopes = resolveAvailableScopes(tp, atp);
+    const scopes = resolveAvailableScopes(tp, atp, timeAllocations);
 
     if (scopes.length === 0) {
       recordLearningPlanBlocked('NO_VALID_SCOPE');
@@ -1009,9 +1031,15 @@ export const LearningPlanManager: React.FC<LearningPlanManagerProps> = ({
                                   <div className="text-xs">
                                     <span className="font-bold text-slate-800 mr-1.5">Langkah {item.stepNumber || '-'}</span>
                                     <span className="text-slate-700">{item.materialScope || item.tpStatement || linkedTp?.statement || 'ATP belum berisi materi'}</span>
-                                    <span className="text-slate-400 block mt-0.5">
-                                      {linkedTp?.code || 'TP'} • {item.jp ?? item.allocatedJP ?? 'JP belum ditentukan'} JP
-                                    </span>
+                                    {(() => {
+                                      const semesterJp = resolveAtpItemSemesterJP(item, timeAllocations);
+                                      const jpText = semesterJp !== null ? `${semesterJp} JP` : 'JP belum dialokasikan';
+                                      return (
+                                        <span className="text-slate-400 block mt-0.5">
+                                          {linkedTp?.code || 'TP'} • {jpText}
+                                        </span>
+                                      );
+                                    })()}
                                   </div>
                                 </label>
                               );

@@ -14,6 +14,7 @@ import { exportAssessmentPdf } from '../../assessmentExportService';
 import { normalizeSemester } from '../../../academicScope';
 import { buildPromesProjection, buildAlokasiWaktuProjection } from '../../promesProjection';
 import { buildProtaProjection, buildK13ProtaProjection } from '../../protaProjection';
+import { buildModulAjarProjection } from '../../modulAjarProjection';
 import { buildK13AlokasiWaktuRows } from '../../k13AlokasiWaktuHelper';
 
 export async function generatePdfDocument(
@@ -515,36 +516,27 @@ export async function generatePdfDocument(
     }
 
     case 'MODUL_AJAR': {
-      // Resolve canonical LearningPlan
-      const matchedPlan =
-        (context.learningPlans || []).find((lp) => lp.id === context.activeLearningPlanId) ||
-        (context.learningPlans || []).find((lp) => lp.academicSettingId === academicSetting?.id && lp.status === 'SIAP') ||
-        (context.learningPlans || []).find((lp) => lp.academicSettingId === academicSetting?.id) ||
-        (context.learningPlans || [])[0];
+      const projection = buildModulAjarProjection(context);
 
       if (!isBlankMode) {
-        if (!matchedPlan) {
-          throw new Error('PDF Modul Ajar gagal diekspor: Rancangan Pembelajaran (LearningPlan) tidak ditemukan. Silakan buat Modul Ajar di menu Perencanaan Pembelajaran.');
-        }
-        if (matchedPlan.status !== 'SIAP') {
-          throw new Error(`PDF Modul Ajar gagal diekspor: Status Perencanaan Pembelajaran masih '${matchedPlan.status}'. Harus berstatus 'SIAP' untuk ekspor dokumen final.`);
+        if (!projection.isReady || !projection.plan) {
+          throw new Error(projection.error || 'PDF Modul Ajar belum siap.');
         }
       }
+
+      const matchedPlan = projection.plan;
 
       title = isBlankMode ? 'Format Kosong Modul Ajar / RPP Berdiferensiasi' : 'Modul Ajar / RPP Berdiferensiasi';
       subTitle = `${subject} — ${grade} (${academicSetting?.phase || '-'}) — Semester ${semester}`;
       fileName = `Modul_Ajar_${cleanSubject}_${cleanGrade}.pdf`;
 
-      // Compile TP string strictly from canonical objectives or resolved TPs
-      let tpStatements = '-';
-      if (matchedPlan?.objectives && matchedPlan.objectives.length > 0) {
-        tpStatements = matchedPlan.objectives.map((o, idx) => `${idx + 1}. ${o.code ? `[${o.code}] ` : ''}${o.statement}`).join('\n');
-      } else if (matchedPlan?.tpIds && matchedPlan.tpIds.length > 0 && tp?.items) {
-        const resolved = matchedPlan.tpIds.map((id) => tp.items.find((t) => t.id === id)).filter(Boolean);
-        if (resolved.length > 0) {
-          tpStatements = resolved.map((t, idx) => `${idx + 1}. [${t!.code || `TP ${idx + 1}`}] ${t!.statement}`).join('\n');
-        }
-      }
+      // Compile TP string strictly from canonical resolved TPs
+      const tpStatements =
+        projection.resolvedTPs.length > 0
+          ? projection.resolvedTPs
+              .map((t, idx) => `${idx + 1}. ${t.code ? `[${t.code}] ` : ''}${t.statement}`)
+              .join('\n')
+          : '-';
 
       const dimensionsList =
         matchedPlan?.graduateProfileDimensions && matchedPlan.graduateProfileDimensions.length > 0
@@ -558,13 +550,19 @@ export async function generatePdfDocument(
         ? matchedPlan.resources.map((r, i) => `${i + 1}. ${r.title}${r.source ? ` (${r.source})` : ''}`).join('\n')
         : '-';
 
+      const alokasiWaktuStr = typeof projection.resolvedAllocatedJP === 'number' && projection.resolvedAllocatedJP > 0
+        ? `${projection.resolvedAllocatedJP} JP`
+        : 'Belum Ditetapkan';
+
       const infoUmumLines: string[] = [];
       if (isBlankMode) {
+        infoUmumLines.push('Alokasi Waktu: ........ JP');
         infoUmumLines.push('Kompetensi Awal: ........................................................');
         infoUmumLines.push('Dimensi Profil Lulusan: ........................................................');
         infoUmumLines.push('Sarana & Prasarana: ........................................................');
         infoUmumLines.push('Model Pembelajaran: ........................................................');
       } else {
+        infoUmumLines.push(`Alokasi Waktu: ${alokasiWaktuStr}`);
         infoUmumLines.push(`Kompetensi Awal: ${matchedPlan?.initialCompetency || '-'}`);
         infoUmumLines.push(`Dimensi Profil Lulusan: ${dimensionsStr}`);
         infoUmumLines.push(`Sarana & Prasarana: ${resourcesStr}`);

@@ -15,7 +15,7 @@ import saveAs from 'file-saver';
 import { DocumentGenerationContext, GeneratedDocumentResult } from '../types';
 import { formatOfficialDate } from '../docxStyles';
 import { LearningPlan, SchoolData, TeacherProfile } from '../../../types';
-import { validateLearningPlan, createEmptyLearningPlan } from '../../learningPlanService';
+import { createEmptyLearningPlan } from '../../learningPlanService';
 import { getCurriculumTypeFromSetting, isMerdeka } from '../../curriculumRouter';
 import { buildModulAjarProjection } from '../modulAjarProjection';
 
@@ -211,25 +211,11 @@ export async function generateModulAjar(context: DocumentGenerationContext): Pro
   } else {
     const projection = buildModulAjarProjection(context);
     if (!projection.isReady || !projection.plan) {
-      throw new Error(projection.error || 'Rencana pembelajaran (Modul Ajar) belum siap.');
+      throw new Error(projection.error || 'Modul Ajar belum siap.');
     }
     plan = projection.plan;
     resolvedTPs = projection.resolvedTPs;
     resolvedAllocatedJP = projection.resolvedAllocatedJP;
-
-    // Validate Plan against active context
-    const validation = validateLearningPlan(plan, {
-      academicSetting,
-      tp,
-      atp,
-      k13Analysis: context.k13Analysis,
-      timeAllocations: context.timeAllocations,
-      assessmentCriteria: context.assessmentCriteria,
-    });
-
-    if (!validation.valid) {
-      throw new Error(`Rancangan Pembelajaran tidak valid untuk ekspor dokumen final: ${validation.errors.join('; ')}`);
-    }
   }
 
   const docChildren: (Paragraph | Table)[] = [];

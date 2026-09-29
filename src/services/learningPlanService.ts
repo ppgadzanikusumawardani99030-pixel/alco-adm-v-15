@@ -126,25 +126,12 @@ export interface LearningPlanJPResolution {
   issues?: string[];
 }
 
-function isTimeAllocationRelatedToPlan(allocation: TimeAllocation, plan: LearningPlan): boolean {
-  if (allocation.academicSettingId && allocation.academicSettingId !== plan.academicSettingId) return false;
-  const planAtpIds = new Set(plan.atpItemIds || []);
-  const planTpIds = new Set(plan.tpIds || []);
-  const linkedByAtp = !!(
-    (allocation.atpItemId && planAtpIds.has(allocation.atpItemId)) ||
-    (allocation.sourceId && planAtpIds.has(allocation.sourceId))
-  );
-  const linkedByTp = !!(allocation.tpId && planTpIds.has(allocation.tpId));
-  return linkedByAtp || linkedByTp;
-}
-
 /**
  * Resolves allocated JP strictly from real data hierarchy:
  * 1. explicit LearningPlan.allocatedJP
- * 2. canonical ATP allocatedJP / jp from linked atpItemIds
- * 3. linked TimeAllocation actual value
- * 4. UNRESOLVED (undefined)
- * Never guesses or falls back to synthetic numbers like 2.
+ * 2. linked TimeAllocation
+ * 3. UNRESOLVED
+ * Never guesses or falls back to synthetic numbers or annual ATP totals.
  */
 export function resolveLearningPlanAllocatedJP(
   plan: LearningPlan,

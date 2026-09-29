@@ -24,7 +24,6 @@ import { generatePdfDocument } from './renderers/pdf/pdfDocGenerators';
 import { PdfDocumentBuilder, buildPdfFromOptions } from './renderers/pdf/pdfRenderer';
 import { PDF_THEME } from './renderers/pdf/pdfTheme';
 
-import { validateLearningPlan } from '../learningPlanService';
 import { isValidDocumentDate } from '../documentDateService';
 import { validateKKTPData } from '../cpWorkflowService';
 import { checkAssessmentExportEligibility, isAssessmentDocumentSnapshot } from './assessmentExportService';
@@ -454,20 +453,11 @@ export function validateDocumentRequirements(
 
       case 'MODUL_AJAR': {
         const projection = buildModulAjarProjection(context as DocumentGenerationContext);
-        if (projection.error) {
-          missingFields.push(projection.error);
-        } else if (projection.plan) {
-          const planVal = validateLearningPlan(projection.plan, {
-            academicSetting: context.academicSetting,
-            tp: context.tp,
-            atp: context.atp,
-            k13Analysis: context.k13Analysis,
-            timeAllocations: context.timeAllocations,
-            assessmentCriteria: context.assessmentCriteria,
-          });
-          if (!planVal.valid) {
-            missingFields.push(...planVal.errors);
-          }
+        if (!projection.isReady) {
+          missingFields.push(
+            projection.error ||
+              'Modul Ajar belum siap untuk diekspor.'
+          );
         }
         break;
       }

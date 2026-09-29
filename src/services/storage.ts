@@ -119,31 +119,13 @@ export function generateWorkspaceName(setting: {
 export function getInitialState(): AppStorageState {
   return {
     version: 4,
-    activeProfileId: 'prof-default-1',
-    activeWorkspaceId: 'ws-default-1',
-    profiles: [{
-      id: 'prof-default-1',
-      name: 'Guru Utama',
-      nip: '198001012005011001',
-      status: 'PNS',
-      defaultSubject: 'Bahasa Indonesia',
-      defaultLevel: 'SD',
-      schoolId: 'sch-default-1'
-    }],
-    schools: [{
-      id: 'sch-default-1',
-      name: 'Sekolah Dasar Negeri 01',
-      address: 'Jl. Contoh No. 1',
-      level: 'SD'
-    }],
+    activeProfileId: '',
+    activeWorkspaceId: '',
+    profiles: [],
+    schools: [],
     teacherSchoolAssignments: [],
     principalHistories: [],
-    workspaces: [{
-      id: 'ws-default-1',
-      profileId: 'prof-default-1',
-      schoolId: 'sch-default-1',
-      name: 'Ruang Kerja Utama'
-    }],
+    workspaces: [],
     academicSettings: [],
     cps: [],
     cpAnalyses: [],

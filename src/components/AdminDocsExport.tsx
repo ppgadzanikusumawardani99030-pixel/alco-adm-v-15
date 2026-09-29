@@ -73,6 +73,7 @@ import {
   buildK13AlokasiWaktuRows,
   buildProtaProjection,
   buildK13ProtaProjection,
+  buildModulAjarProjection,
   ProtaSemesterAllocationBundle,
 } from '../services/documentEngine';
 import { getCurriculumType } from '../services/curriculumRules';
@@ -230,6 +231,12 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
     const cpTime = cp?.updatedAt ? new Date(cp.updatedAt).getTime() : 0;
     const tpTime = tp?.updatedAt ? new Date(tp.updatedAt).getTime() : 0;
     const atpTime = atp?.updatedAt ? new Date(atp.updatedAt).getTime() : 0;
+    const learningPlanTime = Math.max(
+      0,
+      ...(learningPlans || []).map((p) =>
+        p.updatedAt ? new Date(p.updatedAt).getTime() : 0
+      )
+    );
 
     switch (type) {
       case 'ANALISIS_CP_TP':
@@ -238,7 +245,9 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
         return cpTime > docTime || tpTime > docTime || atpTime > docTime;
       case 'PROTA':
       case 'PROMES':
+        return atpTime > docTime || tpTime > docTime || cpTime > docTime;
       case 'MODUL_AJAR':
+        return learningPlanTime > docTime || atpTime > docTime || tpTime > docTime || cpTime > docTime;
       case 'ASESMEN':
       case 'JURNAL':
         return atpTime > docTime || tpTime > docTime || cpTime > docTime;
@@ -1721,36 +1730,67 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
 
             {/* 4. MODUL AJAR PREVIEW */}
             {activePreviewType === 'MODUL_AJAR' && (() => {
-              const activePlan = (learningPlans && learningPlans.length > 0)
-                ? (learningPlans.find((p) => p.status === 'SIAP') || learningPlans[0])
-                : null;
-              
-              const resolvedTPs = activePlan
-                ? (tp?.items || []).filter((t) => activePlan.tpIds.includes(t.id))
-                : (tp?.items || []);
+              if (documentMode === 'blank') {
+                return (
+                  <div className="space-y-3 text-slate-800">
+                    <div className="bg-blue-50/60 p-3 rounded-xl border border-blue-100 space-y-1">
+                      <div className="font-bold text-blue-950 uppercase text-[11px]">I. Informasi Umum & Alokasi Waktu (Format Kosong)</div>
+                      <div className="text-[11px] text-slate-600 leading-relaxed font-mono space-y-1">
+                        <div>Model: ....................................</div>
+                        <div>Alokasi Waktu: ........ JP</div>
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                      <div className="font-bold text-slate-900 uppercase text-[11px]">II. Tujuan Pembelajaran (Format Kosong)</div>
+                      <div className="text-[11px] text-slate-600 font-mono">
+                        Tujuan Pembelajaran: ....................................
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                      <div className="font-bold text-slate-900 uppercase text-[11px]">III. Kegiatan Pembelajaran (Format Kosong)</div>
+                      <div className="text-[11px] text-slate-600 font-mono">
+                        Kegiatan Pembelajaran: ....................................
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              const projection = buildModulAjarProjection(context);
+
+              if (!projection.isReady || !projection.plan) {
+                return (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs font-medium space-y-2">
+                    <div className="font-bold flex items-center gap-1.5 text-amber-900">
+                      <AlertCircle className="w-4 h-4 text-amber-600" />
+                      Prasyarat Modul Ajar Belum Terpenuhi
+                    </div>
+                    <div>{projection.error || 'Modul Ajar belum dapat dipratinjau karena belum ada rancangan dengan status SIAP atau prasyarat belum lengkap.'}</div>
+                  </div>
+                );
+              }
+
+              const plan = projection.plan;
+              const resolvedTPs = projection.resolvedTPs;
+              const alokasiWaktuDisplay = typeof projection.resolvedAllocatedJP === 'number' && projection.resolvedAllocatedJP > 0
+                ? `${projection.resolvedAllocatedJP} JP`
+                : 'Belum Ditetapkan';
 
               return (
                 <div className="space-y-3 text-slate-800">
                   <div className="bg-blue-50/60 p-3 rounded-xl border border-blue-100 space-y-1">
                     <div className="flex items-center justify-between">
                       <div className="font-bold text-blue-950 uppercase text-[11px]">I. Informasi Umum & Alokasi Waktu</div>
-                      {activePlan && (
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                          activePlan.status === 'SIAP'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-amber-50 text-amber-700 border-amber-200'
-                        }`}>
-                          {activePlan.status === 'SIAP' ? 'SIAP (Terkonfirmasi)' : `DRAF (${activePlan.status})`}
-                        </span>
-                      )}
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                        SIAP (Terkonfirmasi)
+                      </span>
                     </div>
                     <div className="text-[11px] text-slate-600 leading-relaxed">
-                      {activePlan?.learningModel
-                        ? `Model: ${activePlan.learningModel}. `
+                      {plan.learningModel
+                        ? `Model: ${plan.learningModel}. `
                         : ''}
-                      Alokasi Waktu:{' '}
-                      <strong>{activePlan?.allocatedJP ? `${activePlan.allocatedJP} JP` : `${atp?.items?.reduce((a, b) => a + (Number(b.jp) || 0), 0) || 0} JP (Total ATP)`}</strong>.
-                      {activePlan?.targetStudents && ` Target: ${activePlan.targetStudents}.`}
+                      Alokasi Waktu: <strong>{alokasiWaktuDisplay}</strong>.
+                      {plan.targetStudents && ` Target: ${plan.targetStudents}.`}
                     </div>
                   </div>
 
@@ -1759,9 +1799,9 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
                     <div className="text-[11px] text-slate-600 leading-relaxed">
                       {resolvedTPs.length > 0 ? (
                         <ul className="list-disc pl-4 space-y-0.5 mt-1">
-                          {resolvedTPs.map((t) => (
-                            <li key={t.id}>
-                              <strong>[{t.code || 'TP'}]</strong> {t.statement}
+                          {resolvedTPs.map((t, idx) => (
+                            <li key={t.id || idx}>
+                              <strong>[{t.code || `TP ${idx + 1}`}]</strong> {t.statement}
                             </li>
                           ))}
                         </ul>
@@ -1774,19 +1814,34 @@ export const AdminDocsExport: React.FC<AdminDocsExportProps> = ({
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
                     <div className="font-bold text-slate-900 uppercase text-[11px]">III. Langkah Kegiatan Pembelajaran</div>
                     <div className="text-[11px] text-slate-600 leading-relaxed">
-                      {activePlan?.learningSteps ? (
+                      {plan.learningExperiences && plan.learningExperiences.length > 0 ? (
+                        <div className="space-y-1 mt-1">
+                          <div>
+                            <span className="font-semibold">Memahami:</span>{' '}
+                            {plan.learningExperiences.filter((e) => e.phase === 'UNDERSTAND').map((e) => e.description).join('; ') || '-'}
+                          </div>
+                          <div>
+                            <span className="font-semibold">Mengaplikasi:</span>{' '}
+                            {plan.learningExperiences.filter((e) => e.phase === 'APPLY').map((e) => e.description).join('; ') || '-'}
+                          </div>
+                          <div>
+                            <span className="font-semibold">Merefleksi:</span>{' '}
+                            {plan.learningExperiences.filter((e) => e.phase === 'REFLECT').map((e) => e.description).join('; ') || '-'}
+                          </div>
+                        </div>
+                      ) : plan.learningSteps ? (
                         <div className="space-y-1 mt-1">
                           <div>
                             <span className="font-semibold">Pendahuluan:</span>{' '}
-                            {activePlan.learningSteps.opening?.map((s) => s.description).join('; ') || '-'}
+                            {plan.learningSteps.opening?.map((s) => s.description).join('; ') || '-'}
                           </div>
                           <div>
                             <span className="font-semibold">Inti:</span>{' '}
-                            {activePlan.learningSteps.core?.map((s) => s.description).join('; ') || '-'}
+                            {plan.learningSteps.core?.map((s) => s.description).join('; ') || '-'}
                           </div>
                           <div>
                             <span className="font-semibold">Penutup:</span>{' '}
-                            {activePlan.learningSteps.closing?.map((s) => s.description).join('; ') || '-'}
+                            {plan.learningSteps.closing?.map((s) => s.description).join('; ') || '-'}
                           </div>
                         </div>
                       ) : (
